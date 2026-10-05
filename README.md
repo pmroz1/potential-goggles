@@ -1,6 +1,34 @@
 # Potential Goggles
 
-A desktop-only, performance-oriented video editor (early foundation).
+[![CI](https://github.com/pmroz1/potential-goggles/actions/workflows/ci.yml/badge.svg)](https://github.com/pmroz1/potential-goggles/actions/workflows/ci.yml)
+[![Windows release](https://github.com/pmroz1/potential-goggles/actions/workflows/release.yml/badge.svg)](https://github.com/pmroz1/potential-goggles/actions/workflows/release.yml)
+
+A desktop-only, performance-oriented video editor (early foundation). Arrange clips
+on layered video and audio tracks, preview their placement, and edit with undo/redo.
+Media decoding and export are not implemented yet: the preview displays placeholder
+layers, not decoded video.
+
+## Preview
+
+Screenshots of the editor with its sample project and placeholder media:
+
+![Editor with layered timeline and viewport preview](docs/images/editor-preview.png)
+
+![Selected clip and inspector](docs/images/clip-inspector.png)
+
+## Windows installer
+
+Download the `.exe` installer from the [latest release](https://github.com/pmroz1/potential-goggles/releases/latest)
+and run it on Windows. The app requires the Microsoft Edge WebView2 Runtime
+(the installer can install it if necessary). Until a release is published, you
+can download a Windows installer from the **potential-goggles-windows-installer**
+artifact on a successful [Windows release workflow run](https://github.com/pmroz1/potential-goggles/actions/workflows/release.yml).
+
+Maintainers can run the workflow manually to build an artifact without publishing
+a release. Pushing a `v*` tag (for example, `v0.1.0`) builds the NSIS installer
+and attaches it to a GitHub release for that tag.
+
+## Development
 
 | Layer            | Technology                                   | Location               |
 | ---------------- | -------------------------------------------- | ---------------------- |
