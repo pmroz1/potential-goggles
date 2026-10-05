@@ -29,6 +29,10 @@ pub enum EditError {
     InvalidTransform,
     #[error("frame rate numerator and denominator must be positive")]
     InvalidFrameRate,
+    #[error("duration must be positive and no longer than the media")]
+    InvalidDuration,
+    #[error("name must not be empty")]
+    EmptyName,
     #[error("nothing selected")]
     EmptySelection,
     #[error("clipboard is empty")]

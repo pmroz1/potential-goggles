@@ -67,6 +67,10 @@ export class Viewport {
   private readonly containerSize = signal({ width: 640, height: 360 });
   private cancelDrag: (() => void) | null = null;
 
+  protected readonly hasClips = computed(
+    () => this.store.activeSequence()?.tracks.some((t) => t.clips.length > 0) ?? false,
+  );
+
   protected readonly layers = computed(() => {
     const sequence = this.store.activeSequence();
     const project = this.store.project();

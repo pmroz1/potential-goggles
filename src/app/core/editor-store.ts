@@ -7,6 +7,7 @@ import {
   EditResponse,
   Id,
   MediaBackendStatus,
+  MediaSource,
   Sequence,
   Ticks,
   Transform,
@@ -53,6 +54,104 @@ export class EditorStore {
       return found ? [found] : [];
     });
   });
+
+  readonly media = computed(() => this.project()?.media ?? []);
+  /** True while a file is being dragged over the window. */
+  readonly dropActive = signal(false);
+
+  async newProject(): Promise<void> {
+    await this.run(async () => {
+      this.resetView(await this.backend.newProject());
+      this.status.set('New project');
+    });
+  }
+
+  async openProject(): Promise<void> {
+    await this.run(async () => {
+      const snapshot = await this.backend.openProject();
+      if (snapshot) {
+        this.resetView(snapshot);
+        this.status.set(`Opened ${snapshot.project.name}`);
+      }
+    });
+  }
+
+  async saveProject(saveAs = false): Promise<void> {
+    await this.run(async () => {
+      const snapshot = await this.backend.saveProject(
+        saveAs ? null : (this.snapshot()?.path ?? null),
+      );
+      if (snapshot) {
+        this.setSnapshot(snapshot);
+        this.status.set(`Saved to ${snapshot.path}`);
+      }
+    });
+  }
+
+  async importMedia(paths?: string[]): Promise<void> {
+    const before = this.media().length;
+    await this.run(async () => {
+      const snapshot = await this.backend.importMedia(paths);
+      if (snapshot) {
+        this.setSnapshot(snapshot);
+        const count = snapshot.project.media.length - before;
+        this.status.set(`Imported ${count} file${count === 1 ? '' : 's'}`);
+      }
+    });
+  }
+
+  async renameProject(name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== this.project()?.name) {
+      await this.commit({ type: 'renameProject', name: trimmed });
+    }
+  }
+
+  /**
+   * Places a media source on the timeline: at the playhead on a track of the
+   * matching kind (the target track when suitable), or after the last clip on
+   * that track when the playhead position is occupied.
+   */
+  async addToTimeline(source: MediaSource): Promise<void> {
+    const sequence = this.activeSequence();
+    if (!sequence) {
+      return;
+    }
+    const kind = source.kind === 'audio' ? 'audio' : 'video';
+    const candidates = sequence.tracks.filter((t) => t.kind === kind && !t.locked);
+    const track =
+      candidates.find((t) => t.id === this.targetTrackId()) ??
+      (kind === 'video' ? [...candidates].sort((a, b) => a.zIndex - b.zIndex) : candidates)[0];
+    if (!track) {
+      this.error.set(`No unlocked ${kind} track available`);
+      return;
+    }
+    const playhead = this.playhead();
+    const end = playhead + source.duration;
+    const occupied = track.clips.some((c) => c.start < end && c.start + c.duration > playhead);
+    const start = occupied
+      ? track.clips.reduce((latest, c) => Math.max(latest, c.start + c.duration), 0)
+      : playhead;
+    const ok = await this.commit({
+      type: 'addClip',
+      sequenceId: sequence.id,
+      trackId: track.id,
+      sourceId: source.id,
+      start,
+      duration: null,
+    });
+    if (ok) {
+      this.status.set(`Added ${source.name} to ${track.name}`);
+    }
+  }
+
+  private resetView(snapshot: EditorSnapshot): void {
+    this.selectedSequenceId.set(null);
+    this.selection.set(new Set());
+    this.targetTrackId.set(null);
+    this.playhead.set(0);
+    this.setSnapshot(snapshot);
+  }
 
   async load(): Promise<void> {
     await this.run(async () => {

@@ -109,4 +109,36 @@ describe('EditorStore', () => {
     expect(store.activeSequence()?.name).toBe('Social Cut');
     expect(store.selection().size).toBe(0);
   });
+
+  it('imports media and places it after existing clips when the playhead is occupied', async () => {
+    await store.importMedia(['/media/new.mp4']);
+    expect(store.media().map((m) => m.name)).toContain('new.mp4');
+    const source = store.media().find((m) => m.name === 'new.mp4')!;
+    store.setPlayhead(secondsToTicks(1));
+    await store.addToTimeline(source);
+    const op = backend.calls.at(-1);
+    expect(op).toMatchObject({
+      method: 'apply',
+      op: { type: 'addClip', trackId: 'v1', sourceId: source.id, start: secondsToTicks(14) },
+    });
+  });
+
+  it('starts a new project and resets selection and playhead', async () => {
+    store.selectClip('clip-a', false);
+    store.setPlayhead(secondsToTicks(3));
+    await store.newProject();
+    expect(store.project()?.name).toBe('Untitled Project');
+    expect(store.selection().size).toBe(0);
+    expect(store.playhead()).toBe(0);
+  });
+
+  it('saves to the known path and records it', async () => {
+    await store.saveProject();
+    expect(store.snapshot()?.path).toBe('/tmp/test.pgproj');
+    await store.saveProject();
+    expect(backend.calls.at(-1)).toEqual({
+      method: 'saveProject',
+      currentPath: '/tmp/test.pgproj',
+    });
+  });
 });

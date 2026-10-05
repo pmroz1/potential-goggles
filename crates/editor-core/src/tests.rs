@@ -436,3 +436,45 @@ fn edit_op_wire_format_is_tagged_camel_case() {
     let back: EditOp = serde_json::from_value(value).unwrap();
     assert_eq!(back, op);
 }
+
+#[test]
+fn import_media_and_add_clip() {
+    use crate::model::{MediaKind, MediaSource};
+    let mut editor = Editor::new(Project::blank("P"));
+    let seq = editor.project().sequences[0].clone();
+    let video = seq.tracks.iter().find(|t| t.kind == TrackKind::Video).unwrap().id;
+    let audio = seq.tracks.iter().find(|t| t.kind == TrackKind::Audio).unwrap().id;
+    let source = MediaSource {
+        id: SourceId::new(),
+        name: "a.mp4".into(),
+        path: "a.mp4".into(),
+        kind: MediaKind::Video,
+        duration: Ticks::from_seconds(10),
+        width: None,
+        height: None,
+    };
+    let id = editor
+        .apply(&EditOp::ImportMedia { source })
+        .unwrap()
+        .created_source_id
+        .unwrap();
+    let add = |track_id, start| EditOp::AddClip {
+        sequence_id: seq.id,
+        track_id,
+        source_id: id,
+        start,
+        duration: None,
+    };
+    editor.apply(&add(video, Ticks::ZERO)).unwrap();
+    assert!(matches!(
+        editor.apply(&add(video, Ticks::from_seconds(5))),
+        Err(EditError::Overlap(_))
+    ));
+    assert!(matches!(
+        editor.apply(&add(audio, Ticks::ZERO)),
+        Err(EditError::TrackKindMismatch { .. })
+    ));
+    assert!(editor.apply(&EditOp::RenameProject { name: "  ".into() }).is_err());
+    editor.undo().unwrap();
+    assert!(editor.project().sequences[0].tracks.iter().all(|t| t.clips.is_empty()));
+}

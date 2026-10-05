@@ -1,5 +1,7 @@
 import { Injectable } from '@angular/core';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { open, save } from '@tauri-apps/plugin-dialog';
 
 import { EditOp, EditorSnapshot, EditResponse, Id, MediaBackendStatus, Ticks } from './models';
 
@@ -16,7 +18,31 @@ export abstract class EditorBackend {
   abstract copyClips(sequenceId: Id, clipIds: Id[]): Promise<EditorSnapshot>;
   abstract pasteClips(sequenceId: Id, at: Ticks, baseTrackId: Id | null): Promise<EditResponse>;
   abstract mediaStatus(): Promise<MediaBackendStatus>;
+  abstract newProject(): Promise<EditorSnapshot>;
+  /** Asks for a project file and opens it; resolves `null` when cancelled. */
+  abstract openProject(): Promise<EditorSnapshot | null>;
+  /** Saves to `currentPath`, or asks for a location; resolves `null` when cancelled. */
+  abstract saveProject(currentPath: string | null): Promise<EditorSnapshot | null>;
+  /** Imports `paths`, or asks for files when omitted; resolves `null` when cancelled. */
+  abstract importMedia(paths?: string[]): Promise<EditorSnapshot | null>;
+  /** Subscribes to files dropped onto the window. Returns an unsubscribe function. */
+  abstract onFilesDropped(
+    handler: (paths: string[]) => void,
+    onHover?: (active: boolean) => void,
+  ): Promise<() => void>;
 }
+
+const PROJECT_FILTER = [{ name: 'Potential Goggles project', extensions: ['pgproj'] }];
+const MEDIA_FILTER = [
+  {
+    name: 'Media',
+    extensions: [
+      ...['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'wmv'],
+      ...['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'opus'],
+      ...['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'],
+    ],
+  },
+];
 
 /** Talks to the commands registered in `src-tauri/src/lib.rs`. */
 @Injectable()
@@ -47,5 +73,39 @@ export class TauriEditorBackend extends EditorBackend {
 
   mediaStatus(): Promise<MediaBackendStatus> {
     return invoke('media_backend_status');
+  }
+
+  newProject(): Promise<EditorSnapshot> {
+    return invoke('new_project');
+  }
+
+  async openProject(): Promise<EditorSnapshot | null> {
+    const path = await open({ multiple: false, directory: false, filters: PROJECT_FILTER });
+    return path ? invoke('open_project', { path }) : null;
+  }
+
+  async saveProject(currentPath: string | null): Promise<EditorSnapshot | null> {
+    const path =
+      currentPath ??
+      (await save({ defaultPath: 'Untitled Project.pgproj', filters: PROJECT_FILTER }));
+    return path ? invoke('save_project', { path }) : null;
+  }
+
+  async importMedia(paths?: string[]): Promise<EditorSnapshot | null> {
+    const chosen =
+      paths ?? (await open({ multiple: true, directory: false, filters: MEDIA_FILTER }));
+    return chosen && chosen.length > 0 ? invoke('import_media', { paths: chosen }) : null;
+  }
+
+  onFilesDropped(
+    handler: (paths: string[]) => void,
+    onHover?: (active: boolean) => void,
+  ): Promise<() => void> {
+    return getCurrentWebview().onDragDropEvent((event) => {
+      onHover?.(event.payload.type === 'enter' || event.payload.type === 'over');
+      if (event.payload.type === 'drop') {
+        handler(event.payload.paths);
+      }
+    });
   }
 }

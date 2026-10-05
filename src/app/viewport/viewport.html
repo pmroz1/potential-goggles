@@ -34,7 +34,17 @@
           </span>
         </div>
       } @empty {
-        <div class="empty">No video at playhead</div>
+        <div class="empty">
+          @if (store.media().length === 0) {
+            <strong>Start by importing media</strong>
+            <span>Use Import Media or drop files into the window.</span>
+          } @else if (!hasClips()) {
+            <strong>Add a clip to the timeline</strong>
+            <span>Press “+ Add” next to a media item.</span>
+          } @else {
+            No video at playhead
+          }
+        </div>
       }
     </div>
     <div class="info">

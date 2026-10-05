@@ -5,12 +5,14 @@
 
 A desktop-only, performance-oriented video editor in its early stages. Arrange
 clips across video and audio tracks, adjust layers in the viewport, and undo or
-redo edits. Media decoding and export are not available yet; the viewport shows
-placeholders rather than decoded video.
+redo edits. Create, open and save projects (`.pgproj`), import media by button or
+by dropping files into the window, and add them to the timeline. Media decoding
+and export are not available yet; the viewport shows placeholders rather than
+decoded video, and imported clip durations are placeholder defaults.
 
 ## Preview
 
-The previews below show the editor with its sample project and placeholder media:
+The previews below (captured with an earlier sample project) show the editor with placeholder media:
 
 ![Editor workspace with viewport and layered timeline](docs/images/editor-workspace.png)
 

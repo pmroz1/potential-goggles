@@ -97,12 +97,15 @@ export interface EditorSnapshot {
   canUndo: boolean;
   canRedo: boolean;
   clipboard: ClipboardSummary | null;
+  /** File the project was last opened from or saved to. */
+  path: string | null;
 }
 
 export interface EditOutcome {
   revision: number;
   createdClipIds: Id[];
   createdSequenceId: Id | null;
+  createdSourceId?: Id | null;
 }
 
 export interface EditResponse {
@@ -115,6 +118,16 @@ export type EditOp =
   | { type: 'moveClip'; sequenceId: Id; clipId: Id; trackId: Id; start: Ticks }
   | { type: 'setClipTransform'; sequenceId: Id; clipId: Id; transform: Transform }
   | { type: 'deleteClips'; sequenceId: Id; clipIds: Id[] }
+  | { type: 'importMedia'; source: MediaSource }
+  | {
+      type: 'addClip';
+      sequenceId: Id;
+      trackId: Id;
+      sourceId: Id;
+      start: Ticks;
+      duration: Ticks | null;
+    }
+  | { type: 'renameProject'; name: string }
   | { type: 'addSequence'; name: string; frameRate: FrameRate; resolution: Resolution };
 
 export interface MediaBackendStatus {

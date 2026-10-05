@@ -1,5 +1,36 @@
 <header class="toolbar">
-  <span class="project-name">{{ store.project()?.name ?? 'Loading…' }}</span>
+  <div class="file-actions">
+    <button type="button" title="New project (Ctrl/Cmd+N)" (click)="store.newProject()">New</button>
+    <button type="button" title="Open project (Ctrl/Cmd+O)" (click)="store.openProject()">
+      Open
+    </button>
+    <button type="button" title="Save project (Ctrl/Cmd+S)" (click)="store.saveProject()">
+      Save
+    </button>
+    <button
+      type="button"
+      title="Save project as… (Ctrl/Cmd+Shift+S)"
+      (click)="store.saveProject(true)"
+    >
+      Save As
+    </button>
+    <button
+      type="button"
+      class="primary"
+      title="Import media (Ctrl/Cmd+I)"
+      (click)="store.importMedia()"
+    >
+      Import Media
+    </button>
+  </div>
+  <input
+    class="project-name"
+    aria-label="Project name"
+    [value]="store.project()?.name ?? ''"
+    [disabled]="!store.project()"
+    (change)="onProjectName($event)"
+    (keydown.enter)="$any($event.target).blur()"
+  />
 
   <nav class="tabs" role="tablist" aria-label="Sequences">
     @for (sequence of store.sequences(); track sequence.id) {
@@ -68,11 +99,16 @@
 </header>
 
 <main class="workspace">
+  <app-media-bin />
   <app-viewport />
   <app-inspector />
 </main>
 
 <app-timeline class="timeline" />
+
+@if (store.dropActive()) {
+  <div class="drop-overlay">Drop files to import</div>
+}
 
 <footer class="status" role="status">
   @if (store.error(); as error) {

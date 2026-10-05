@@ -1,0 +1,29 @@
+<div class="bin-header">
+  <span class="title">Media</span>
+  <button type="button" class="primary small" (click)="store.importMedia()">Import</button>
+</div>
+<div class="items">
+  @for (source of store.media(); track source.id) {
+    <div class="item">
+      <span class="badge" [attr.data-kind]="source.kind">{{ source.kind }}</span>
+      <span class="meta">
+        <span class="name" [title]="source.path">{{ source.name }}</span>
+        <span class="sub">{{ seconds(source.duration) }}</span>
+      </span>
+      <button
+        type="button"
+        class="small"
+        title="Add to timeline at the playhead"
+        [attr.aria-label]="'Add ' + source.name + ' to timeline'"
+        (click)="store.addToTimeline(source)"
+      >
+        + Add
+      </button>
+    </div>
+  } @empty {
+    <div class="empty">
+      <p>No media yet.</p>
+      <p class="hint">Click Import or drop video, audio and image files anywhere in the window.</p>
+    </div>
+  }
+</div>
