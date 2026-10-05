@@ -1,0 +1,23 @@
+[package]
+name = "potential-goggles"
+description = "Desktop shell for the Potential Goggles video editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "potential_goggles_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+editor-core.workspace = true
+media.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log = "0.4"
+tauri = { version = "2.12.1", features = [] }
+tauri-plugin-log = "2"
