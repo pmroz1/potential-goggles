@@ -27,6 +27,8 @@ pub enum EditError {
     NoTrackForLane(u32),
     #[error("transform values must be finite and scale must be positive")]
     InvalidTransform,
+    #[error("frame rate numerator and denominator must be positive")]
+    InvalidFrameRate,
     #[error("nothing selected")]
     EmptySelection,
     #[error("clipboard is empty")]
