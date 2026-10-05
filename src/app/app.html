@@ -1,0 +1,93 @@
+<header class="toolbar">
+  <span class="project-name">{{ store.project()?.name ?? 'Loading…' }}</span>
+
+  <nav class="tabs" role="tablist" aria-label="Sequences">
+    @for (sequence of store.sequences(); track sequence.id) {
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        [class.active]="sequence.id === store.activeSequence()?.id"
+        [attr.aria-selected]="sequence.id === store.activeSequence()?.id"
+        (click)="store.selectSequence(sequence.id)"
+      >
+        {{ sequence.name }}
+      </button>
+    }
+    <button type="button" class="tab add" title="New sequence" (click)="store.addSequence()">
+      +
+    </button>
+  </nav>
+
+  <div class="actions">
+    <button
+      type="button"
+      title="Undo (Ctrl/Cmd+Z)"
+      [disabled]="!store.snapshot()?.canUndo"
+      (click)="store.undo()"
+    >
+      Undo
+    </button>
+    <button
+      type="button"
+      title="Redo (Ctrl/Cmd+Shift+Z)"
+      [disabled]="!store.snapshot()?.canRedo"
+      (click)="store.redo()"
+    >
+      Redo
+    </button>
+    <span class="sep"></span>
+    <button
+      type="button"
+      title="Copy (Ctrl/Cmd+C)"
+      [disabled]="store.selection().size === 0"
+      (click)="store.copySelection()"
+    >
+      Copy
+    </button>
+    <button
+      type="button"
+      title="Paste at playhead (Ctrl/Cmd+V)"
+      [disabled]="!store.snapshot()?.clipboard"
+      (click)="store.paste()"
+    >
+      Paste
+    </button>
+    <button
+      type="button"
+      title="Delete"
+      [disabled]="store.selection().size === 0"
+      (click)="store.deleteSelection()"
+    >
+      Delete
+    </button>
+    <span class="sep"></span>
+    <button type="button" title="Zoom out" (click)="store.zoom(0.8)">−</button>
+    <button type="button" title="Zoom in" (click)="store.zoom(1.25)">+</button>
+  </div>
+</header>
+
+<main class="workspace">
+  <app-viewport />
+  <app-inspector />
+</main>
+
+<app-timeline class="timeline" />
+
+<footer class="status" role="status">
+  @if (store.error(); as error) {
+    <span class="error">{{ error }}</span>
+  } @else {
+    <span>{{ store.status() }}</span>
+  }
+  <span class="spacer"></span>
+  @if (store.snapshot()?.clipboard; as clipboard) {
+    <span>Clipboard: {{ clipboard.clipCount }} clip{{ clipboard.clipCount === 1 ? '' : 's' }}</span>
+  }
+  @if (store.mediaStatus(); as media) {
+    <span [title]="media.detail"
+      >Media: {{ media.name }} {{ media.available ? 'ready' : 'not linked' }}</span
+    >
+  }
+  <span>rev {{ store.project()?.revision ?? 0 }}</span>
+</footer>

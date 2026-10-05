@@ -1,0 +1,41 @@
+<div #container class="viewport">
+  @if (store.activeSequence(); as sequence) {
+    <div
+      class="stage"
+      [style.width.px]="stage().width"
+      [style.height.px]="stage().height"
+      (pointerdown)="store.clearSelection()"
+    >
+      @for (layer of layers(); track layer.clip.id) {
+        @let box = layerBox(layer);
+        <div
+          class="layer"
+          [attr.data-clip-id]="layer.clip.id"
+          [class.selected]="store.selection().has(layer.clip.id)"
+          [style.left.px]="box.left"
+          [style.top.px]="box.top"
+          [style.width.px]="box.width"
+          [style.height.px]="box.height"
+          [style.rotate.deg]="layer.clip.transform.rotation"
+          [style.opacity]="layer.clip.opacity"
+          [style.z-index]="$index + 1"
+          [style.mix-blend-mode]="blendMode(layer.track.blendMode)"
+          [style.--clip-color]="layer.clip.color"
+          (pointerdown)="onLayerPointerDown($event, layer)"
+        >
+          <span class="layer-name">{{ layer.clip.name }}</span>
+          <span class="layer-meta">
+            {{ layer.track.name }} · {{ layer.source?.name ?? 'missing source' }} &#64;
+            {{ timecode(layer.sourceTime) }}
+          </span>
+        </div>
+      } @empty {
+        <div class="empty">No video at playhead</div>
+      }
+    </div>
+    <div class="info">
+      {{ sequence.name }} · {{ sequence.resolution.width }}×{{ sequence.resolution.height }} ·
+      {{ fps(sequence) }} fps · {{ timecode(store.playhead()) }}
+    </div>
+  }
+</div>

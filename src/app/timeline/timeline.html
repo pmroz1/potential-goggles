@@ -1,0 +1,65 @@
+<div class="timeline">
+  <div class="headers">
+    <div class="header-spacer">{{ timecode(store.playhead()) }}</div>
+    @for (track of displayTracks(); track track.id) {
+      <button
+        type="button"
+        class="track-header"
+        [class.audio]="track.kind === 'audio'"
+        [class.target]="store.targetTrackId() === track.id"
+        [style.height.px]="laneHeight"
+        [attr.aria-pressed]="store.targetTrackId() === track.id"
+        (click)="store.setTargetTrack(track.id)"
+      >
+        <span class="track-name">{{ track.name }}</span>
+        <span class="track-meta">
+          {{ track.kind }} · z {{ track.zIndex }}
+          @if (track.locked) {
+            · locked
+          }
+        </span>
+      </button>
+    }
+  </div>
+
+  <div class="scroll">
+    <div class="content" [style.width.px]="contentWidth()">
+      <div #ruler class="ruler" (pointerdown)="onRulerPointerDown($event)">
+        @for (mark of rulerMarks(); track mark.x) {
+          <span class="mark" [style.left.px]="mark.x">{{ mark.label }}</span>
+        }
+      </div>
+      <div #lanes class="lanes">
+        @for (track of displayTracks(); track track.id) {
+          <div
+            class="lane"
+            [class.audio]="track.kind === 'audio'"
+            [class.locked]="track.locked"
+            [class.target]="store.targetTrackId() === track.id"
+            [style.height.px]="laneHeight"
+            [attr.data-track-id]="track.id"
+            (pointerdown)="onLanePointerDown($event, track)"
+          >
+            @for (clip of track.clips; track clip.id) {
+              <div
+                class="clip"
+                role="button"
+                [attr.data-clip-id]="clip.id"
+                [attr.aria-label]="clip.name"
+                [class.selected]="store.selection().has(clip.id)"
+                [style.left.px]="clipX(clip)"
+                [style.width.px]="clipWidth(clip)"
+                [style.--clip-color]="clip.color"
+                (pointerdown)="onClipPointerDown($event, track, clip)"
+              >
+                <span class="clip-name">{{ clip.name }}</span>
+                <span class="clip-meta">in {{ timecode(clip.source.inPoint) }}</span>
+              </div>
+            }
+          </div>
+        }
+        <div class="playhead" [style.translate.px]="playheadX()"></div>
+      </div>
+    </div>
+  </div>
+</div>
