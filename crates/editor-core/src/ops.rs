@@ -115,6 +115,9 @@ pub fn apply(project: &mut Project, op: &EditOp) -> Result<EditOutcome, EditErro
             frame_rate,
             resolution,
         } => {
+            if frame_rate.numerator == 0 || frame_rate.denominator == 0 {
+                return Err(EditError::InvalidFrameRate);
+            }
             let sequence = Sequence::with_default_tracks(name.clone(), *frame_rate, *resolution);
             outcome.created_sequence_id = Some(sequence.id);
             project.sequences.push(sequence);
@@ -189,6 +192,9 @@ fn paste_clips(
         return Err(EditError::NegativeTime);
     }
     for entry in &payload.entries {
+        if !entry.clip.transform.is_finite() || entry.clip.transform.scale <= 0.0 {
+            return Err(EditError::InvalidTransform);
+        }
         let source_id = entry.clip.source.source_id;
         if project.source(source_id).is_none() {
             return Err(EditError::SourceNotFound(source_id));

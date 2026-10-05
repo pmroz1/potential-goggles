@@ -1,5 +1,6 @@
 import { EditorBackend } from '../core/editor-backend';
 import {
+  Clip,
   EditOp,
   EditorSnapshot,
   EditResponse,
@@ -7,6 +8,8 @@ import {
   MediaBackendStatus,
   Project,
   Ticks,
+  findClip,
+  tracksByZ,
 } from '../core/models';
 import { secondsToTicks } from '../core/time';
 
@@ -137,6 +140,8 @@ export type BackendCall =
 export class FakeEditorBackend extends EditorBackend {
   readonly calls: BackendCall[] = [];
   failWith: string | null = null;
+  private copiedClips: { clip: Clip; trackId: Id; laneOffset: number; timeOffset: Ticks }[] = [];
+  private nextPastedId = 0;
   snapshot: EditorSnapshot = {
     project: fixtureProject(),
     canUndo: false,
@@ -185,6 +190,17 @@ export class FakeEditorBackend extends EditorBackend {
   async copyClips(sequenceId: Id, clipIds: Id[]): Promise<EditorSnapshot> {
     this.calls.push({ method: 'copyClips', sequenceId, clipIds });
     this.throwIfFailing();
+    const sequence = this.snapshot.project.sequences.find((q) => q.id === sequenceId)!;
+    const stack = tracksByZ(sequence);
+    const clips = clipIds.map((id) => findClip(sequence, id)!);
+    const firstLane = Math.min(...clips.map(({ track }) => stack.indexOf(track)));
+    const firstStart = Math.min(...clips.map(({ clip }) => clip.start));
+    this.copiedClips = clips.map(({ track, clip }) => ({
+      clip: structuredClone(clip),
+      trackId: track.id,
+      laneOffset: stack.indexOf(track) - firstLane,
+      timeOffset: clip.start - firstStart,
+    }));
     this.snapshot = {
       ...this.snapshot,
       clipboard: { clipCount: clipIds.length, sourceSequenceId: sequenceId },
@@ -195,11 +211,27 @@ export class FakeEditorBackend extends EditorBackend {
   async pasteClips(sequenceId: Id, at: Ticks, baseTrackId: Id | null): Promise<EditResponse> {
     this.calls.push({ method: 'pasteClips', sequenceId, at, baseTrackId });
     this.throwIfFailing();
+    const sequence = this.snapshot.project.sequences.find((q) => q.id === sequenceId)!;
+    const stack = tracksByZ(sequence);
+    const baseLane = stack.findIndex((track) => track.id === baseTrackId);
+    const createdClipIds: Id[] = [];
+    for (const entry of this.copiedClips) {
+      const track =
+        baseLane >= 0
+          ? stack[baseLane + entry.laneOffset]
+          : sequence.tracks.find((t) => t.id === entry.trackId)!;
+      const id = `pasted-${++this.nextPastedId}`;
+      track.clips.push({ ...structuredClone(entry.clip), id, start: at + entry.timeOffset });
+      track.clips.sort((a, b) => a.start - b.start);
+      createdClipIds.push(id);
+    }
+    this.snapshot.project.revision += 1;
+    this.snapshot.canUndo = true;
     return {
       snapshot: structuredClone(this.snapshot),
       outcome: {
         revision: this.snapshot.project.revision,
-        createdClipIds: ['clip-a'],
+        createdClipIds,
         createdSequenceId: null,
       },
     };

@@ -309,6 +309,27 @@ fn paste_requires_clipboard_and_known_sources() {
 }
 
 #[test]
+fn paste_rejects_invalid_transforms_without_mutating_project() {
+    let (mut editor, seq_id, _) = setup();
+    let logo = clip_named(main_seq(&editor), "Logo").id;
+    let mut payload = editor.copy(seq_id, &[logo]).unwrap().clone();
+    let before = editor.project().clone();
+    for scale in [0.0, -1.0, f64::NAN] {
+        payload.entries[0].clip.transform.scale = scale;
+        assert_eq!(
+            editor.apply(&EditOp::PasteClips {
+                sequence_id: seq_id,
+                payload: payload.clone(),
+                at: secs(40),
+                base_track_id: None,
+            }),
+            Err(EditError::InvalidTransform)
+        );
+        assert_eq!(editor.project(), &before);
+    }
+}
+
+#[test]
 fn clipboard_json_roundtrip_and_validation() {
     let (mut editor, seq_id, _) = setup();
     let logo = clip_named(main_seq(&editor), "Logo").id;
@@ -375,6 +396,27 @@ fn add_and_delete() {
         })
         .unwrap();
     assert!(main_seq(&editor).clip(logo).is_none());
+}
+
+#[test]
+fn add_sequence_rejects_zero_frame_rate_components() {
+    let (mut editor, _, _) = setup();
+    let before = editor.project().clone();
+    for (numerator, denominator) in [(0, 1), (30, 0), (0, 0)] {
+        assert_eq!(
+            editor.apply(&EditOp::AddSequence {
+                name: "Invalid".into(),
+                frame_rate: FrameRate::new(numerator, denominator),
+                resolution: Resolution {
+                    width: 1920,
+                    height: 1080,
+                },
+            }),
+            Err(EditError::InvalidFrameRate)
+        );
+        assert_eq!(editor.project(), &before);
+        assert!(!editor.can_undo());
+    }
 }
 
 #[test]

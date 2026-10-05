@@ -171,4 +171,33 @@ export class Viewport {
       },
     });
   }
+
+  protected onLayerKeyDown(event: KeyboardEvent, layer: ViewportLayer): void {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      this.store.selectClip(layer.clip.id, event.shiftKey || event.ctrlKey || event.metaKey);
+      return;
+    }
+    const direction: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    };
+    const delta = direction[event.key];
+    if (!delta) {
+      return;
+    }
+    event.preventDefault();
+    this.store.selectClip(layer.clip.id, false);
+    if (!layer.track.locked) {
+      const step = event.shiftKey ? 10 : 1;
+      const transform = layer.clip.transform;
+      void this.store.setClipTransform(layer.clip.id, {
+        ...transform,
+        x: transform.x + delta[0] * step,
+        y: transform.y + delta[1] * step,
+      });
+    }
+  }
 }
