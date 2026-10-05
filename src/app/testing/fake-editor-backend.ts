@@ -131,7 +131,8 @@ export type BackendCall =
   | { method: 'apply'; op: EditOp }
   | { method: 'copyClips'; sequenceId: Id; clipIds: Id[] }
   | { method: 'pasteClips'; sequenceId: Id; at: Ticks; baseTrackId: Id | null }
-  | { method: 'undo' | 'redo' | 'newProject' | 'openProject' }
+  | { method: 'undo' | 'redo' | 'newProject' | 'openProject' | 'cancelExport' }
+  | { method: 'exportSequence'; sequenceId: Id; defaultName: string }
   | { method: 'saveProject'; currentPath: string | null }
   | { method: 'importMedia'; paths?: string[] };
 
@@ -301,18 +302,39 @@ export class FakeEditorBackend extends EditorBackend {
     return structuredClone(this.snapshot);
   }
 
+  exportResult: string | null = '/tmp/out.mp4';
+  exportGate: Promise<void> | null = null;
+
+  async exportSequence(
+    sequenceId: Id,
+    defaultName: string,
+    onProgress: (fraction: number) => void,
+  ): Promise<string | null> {
+    this.calls.push({ method: 'exportSequence', sequenceId, defaultName });
+    this.throwIfFailing();
+    onProgress(0.5);
+    await this.exportGate;
+    return this.exportResult;
+  }
+
+  async cancelExport(): Promise<void> {
+    this.calls.push({ method: 'cancelExport' });
+  }
+
   async onFilesDropped(): Promise<() => void> {
     return () => undefined;
   }
 
+  mediaBackend: MediaBackendStatus = {
+    name: 'ffmpeg',
+    available: true,
+    canDecode: false,
+    canExport: true,
+    detail: 'ffmpeg test',
+  };
+
   async mediaStatus(): Promise<MediaBackendStatus> {
-    return {
-      name: 'ffmpeg',
-      available: false,
-      canDecode: false,
-      canExport: false,
-      detail: 'not linked',
-    };
+    return this.mediaBackend;
   }
 
   private throwIfFailing(): void {

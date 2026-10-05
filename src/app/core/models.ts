@@ -146,6 +146,15 @@ export function tracksByZ(sequence: Sequence): Track[] {
     .map(({ track }) => track);
 }
 
+/** End of the last clip on any track. */
+export function sequenceDuration(sequence: Sequence): Ticks {
+  return sequence.tracks.reduce(
+    (max, track) =>
+      track.clips.reduce((end, clip) => Math.max(end, clip.start + clip.duration), max),
+    0,
+  );
+}
+
 export function findClip(sequence: Sequence, clipId: Id): { track: Track; clip: Clip } | null {
   for (const track of sequence.tracks) {
     const clip = track.clips.find((c) => c.id === clipId);

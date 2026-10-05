@@ -3,14 +3,17 @@
 //! The editing core never talks to codecs directly. Instead, everything that
 //! needs actual media bytes (probing files, decoding frames for the viewport,
 //! rendering a sequence to a file) goes through the [`MediaBackend`] trait.
-//! The intended production implementation wraps FFmpeg (libavformat /
-//! libavcodec / libswscale / libswresample); it is not linked yet, so the
-//! application ships with [`UnavailableBackend`], which reports itself as
-//! unavailable and rejects all requests.
+//! [`FfmpegCli`] implements probing and export by running the `ffmpeg` and
+//! `ffprobe` tools found on `PATH`; [`UnavailableBackend`] is the fallback that
+//! reports itself as unavailable and rejects all requests.
 //!
 //! Keeping this boundary narrow lets the FFmpeg integration (and its native
 //! build/licensing concerns) be added later without touching the editing core
 //! or the UI.
+
+mod ffmpeg;
+
+pub use ffmpeg::{FfmpegCli, build_export_args};
 
 use std::path::{Path, PathBuf};
 

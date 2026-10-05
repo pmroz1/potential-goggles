@@ -6,9 +6,18 @@
 A desktop-only, performance-oriented video editor in its early stages. Arrange
 clips across video and audio tracks, adjust layers in the viewport, and undo or
 redo edits. Create, open and save projects (`.pgproj`), import media by button or
-by dropping files into the window, and add them to the timeline. Media decoding
-and export are not available yet; the viewport shows placeholders rather than
-decoded video, and imported clip durations are placeholder defaults.
+by dropping files into the window, and add them to the timeline.
+
+- **Playback** (Space, or Play/Pause/Stop) advances the playhead in real time.
+  The viewport shows placeholder layers rather than decoded video, and there is
+  no audio output yet.
+- **Export** (Ctrl/Cmd+E) renders the active sequence to MP4 (H.264/AAC) at the
+  sequence's resolution and frame rate, compositing video tracks with their
+  transforms, opacity and blend modes and mixing audio-track clips. Audio
+  embedded in video clips is not included.
+- Export and media probing (real durations and sizes on import) need
+  [FFmpeg](https://ffmpeg.org/) (`ffmpeg` and `ffprobe`) on your `PATH`; it is not
+  bundled with the installer. Without it, Export is disabled.
 
 ## Preview
 

@@ -3,11 +3,12 @@
 //! handled entirely in the UI; the backend only receives committed operations.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-use editor_core::model::{MediaKind, MediaSource};
+use editor_core::model::{MediaKind, MediaSource, Resolution};
 use editor_core::{ClipId, EditOp, EditOutcome, Editor, Project, SequenceId, SourceId, Ticks, TrackId};
-use media::{BackendStatus, MediaBackend, UnavailableBackend};
+use media::{BackendStatus, ExportSettings, FfmpegCli, MediaBackend, MediaError};
 use serde::Serialize;
 
 /// Lightweight description of the editor clipboard sent to the UI.
@@ -40,6 +41,8 @@ pub struct EditResponse {
 pub struct AppState {
     editor: Mutex<Editor>,
     path: Mutex<Option<PathBuf>>,
+    exporting: AtomicBool,
+    export_cancelled: AtomicBool,
     media: Box<dyn MediaBackend>,
 }
 
@@ -48,6 +51,8 @@ impl AppState {
         Self {
             editor: Mutex::new(Editor::new(project)),
             path: Mutex::new(None),
+            exporting: AtomicBool::new(false),
+            export_cancelled: AtomicBool::new(false),
             media,
         }
     }
@@ -166,7 +171,13 @@ impl AppState {
         let mut imported = 0;
         for raw in paths {
             match media_source_for(Path::new(raw)) {
-                Some(source) => {
+                Some(mut source) => {
+                    if let Ok(info) = self.media.probe(Path::new(raw)) {
+                        source.kind = info.kind;
+                        source.duration = info.duration;
+                        source.width = info.resolution.map(|r| r.width);
+                        source.height = info.resolution.map(|r| r.height);
+                    }
                     editor
                         .apply(&EditOp::ImportMedia { source })
                         .map_err(|e| e.to_string())?;
@@ -183,6 +194,71 @@ impl AppState {
             });
         }
         Ok(self.snapshot_of(&editor))
+    }
+
+    /// Renders a sequence to `path` as H.264/AAC in an MP4 container at the
+    /// sequence's frame rate and resolution. `progress` receives `0.0..=1.0`.
+    pub fn export(
+        &self,
+        sequence_id: SequenceId,
+        path: &Path,
+        progress: &mut dyn FnMut(f32),
+    ) -> Result<PathBuf, String> {
+        if self.exporting.swap(true, Ordering::SeqCst) {
+            return Err("An export is already running".to_owned());
+        }
+        self.export_cancelled.store(false, Ordering::SeqCst);
+        let result = self.export_inner(sequence_id, path, progress);
+        self.exporting.store(false, Ordering::SeqCst);
+        result
+    }
+
+    fn export_inner(
+        &self,
+        sequence_id: SequenceId,
+        path: &Path,
+        progress: &mut dyn FnMut(f32),
+    ) -> Result<PathBuf, String> {
+        // Work on a copy so the editor stays responsive while rendering.
+        let project = self.editor().project().clone();
+        let sequence = project
+            .sequence(sequence_id)
+            .ok_or_else(|| "Sequence not found".to_owned())?;
+        let output = if path.extension().is_some() {
+            path.to_owned()
+        } else {
+            path.with_extension("mp4")
+        };
+        if project.media.iter().any(|m| Path::new(&m.path) == output) {
+            return Err("Choose an output file that is not one of the project's media files".to_owned());
+        }
+        let even = |v: u32| (v & !1).max(2);
+        let settings = ExportSettings {
+            output_path: output.clone(),
+            container: "mp4".to_owned(),
+            video_codec: "libx264".to_owned(),
+            audio_codec: "aac".to_owned(),
+            resolution: Resolution {
+                width: even(sequence.resolution.width),
+                height: even(sequence.resolution.height),
+            },
+            frame_rate: sequence.frame_rate,
+            video_bitrate_kbps: None,
+        };
+        self.media
+            .export(&project, sequence_id, &settings, &mut |fraction| {
+                progress(fraction);
+                !self.export_cancelled.load(Ordering::SeqCst)
+            })
+            .map_err(|e| match e {
+                MediaError::Cancelled => "Export cancelled".to_owned(),
+                other => other.to_string(),
+            })?;
+        Ok(output)
+    }
+
+    pub fn cancel_export(&self) {
+        self.export_cancelled.store(true, Ordering::SeqCst);
     }
 
     pub fn media_status(&self) -> BackendStatus {
@@ -220,7 +296,7 @@ fn media_source_for(path: &Path) -> Option<MediaSource> {
 
 mod commands {
     use super::*;
-    use tauri::State;
+    use tauri::{AppHandle, Emitter, Manager, State};
 
     #[tauri::command]
     pub fn get_editor_state(state: State<'_, AppState>) -> EditorSnapshot {
@@ -281,6 +357,26 @@ mod commands {
         state.import_media(&paths)
     }
 
+    /// Renders on a worker thread, emitting `export-progress` (0..1) events.
+    /// Resolves with the path of the written file.
+    #[tauri::command]
+    pub async fn export_sequence(app: AppHandle, sequence_id: SequenceId, path: String) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            let output = state.export(sequence_id, Path::new(&path), &mut |fraction| {
+                let _ = app.emit("export-progress", fraction);
+            })?;
+            Ok(output.to_string_lossy().into_owned())
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
+    #[tauri::command]
+    pub fn cancel_export(state: State<'_, AppState>) {
+        state.cancel_export();
+    }
+
     #[tauri::command]
     pub fn media_backend_status(state: State<'_, AppState>) -> BackendStatus {
         state.media_status()
@@ -291,7 +387,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::new(
             Project::blank("Untitled Project"),
-            Box::new(UnavailableBackend),
+            Box::new(FfmpegCli::detect()),
         ))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -305,6 +401,8 @@ pub fn run() {
             commands::open_project,
             commands::save_project,
             commands::import_media,
+            commands::export_sequence,
+            commands::cancel_export,
             commands::media_backend_status,
         ])
         .setup(|app| {
@@ -324,6 +422,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use media::UnavailableBackend;
 
     fn state() -> AppState {
         AppState::new(editor_core::demo::demo_project(), Box::new(UnavailableBackend))
@@ -377,6 +476,22 @@ mod tests {
         assert_eq!(reopened.project, snap.project);
         std::fs::remove_file(&path).unwrap();
         assert!(state.open_project(&path).is_err());
+    }
+
+    #[test]
+    fn export_requires_a_working_backend_and_clips() {
+        let state = state();
+        let seq = state.snapshot().project.sequences[0].id;
+        let out = std::env::temp_dir().join("pg-never-written.mp4");
+        let err = state.export(seq, &out, &mut |_| {}).unwrap_err();
+        assert!(err.contains("not available"), "{err}");
+        assert!(!out.exists());
+        // The in-flight flag is released after a failure so the user can retry.
+        assert!(state.export(seq, &out, &mut |_| {}).is_err());
+        // Never overwrite a source file.
+        let source = state.snapshot().project.media[0].path.clone();
+        let err = state.export(seq, Path::new(&source), &mut |_| {}).unwrap_err();
+        assert!(err.contains("not one of the project's media"), "{err}");
     }
 
     #[test]

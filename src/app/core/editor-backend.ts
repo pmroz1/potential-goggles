@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open, save } from '@tauri-apps/plugin-dialog';
 
@@ -25,6 +26,16 @@ export abstract class EditorBackend {
   abstract saveProject(currentPath: string | null): Promise<EditorSnapshot | null>;
   /** Imports `paths`, or asks for files when omitted; resolves `null` when cancelled. */
   abstract importMedia(paths?: string[]): Promise<EditorSnapshot | null>;
+  /**
+   * Asks where to save, then renders the sequence. Resolves the output path, or
+   * `null` when the save dialog is cancelled. `onProgress` receives 0..1.
+   */
+  abstract exportSequence(
+    sequenceId: Id,
+    defaultName: string,
+    onProgress: (fraction: number) => void,
+  ): Promise<string | null>;
+  abstract cancelExport(): Promise<void>;
   /** Subscribes to files dropped onto the window. Returns an unsubscribe function. */
   abstract onFilesDropped(
     handler: (paths: string[]) => void,
@@ -73,6 +84,30 @@ export class TauriEditorBackend extends EditorBackend {
 
   mediaStatus(): Promise<MediaBackendStatus> {
     return invoke('media_backend_status');
+  }
+
+  async exportSequence(
+    sequenceId: Id,
+    defaultName: string,
+    onProgress: (fraction: number) => void,
+  ): Promise<string | null> {
+    const path = await save({
+      defaultPath: `${defaultName}.mp4`,
+      filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+    });
+    if (!path) {
+      return null;
+    }
+    const unlisten = await listen<number>('export-progress', (event) => onProgress(event.payload));
+    try {
+      return await invoke<string>('export_sequence', { sequenceId, path });
+    } finally {
+      unlisten();
+    }
+  }
+
+  async cancelExport(): Promise<void> {
+    await invoke('cancel_export');
   }
 
   newProject(): Promise<EditorSnapshot> {

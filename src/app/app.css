@@ -68,6 +68,15 @@
   color: #fff;
 }
 
+.transport {
+  display: flex;
+  gap: 4px;
+}
+
+.export-progress {
+  color: var(--accent);
+}
+
 .actions {
   display: flex;
   align-items: center;

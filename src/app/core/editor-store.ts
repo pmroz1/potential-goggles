@@ -12,6 +12,7 @@ import {
   Ticks,
   Transform,
   findClip,
+  sequenceDuration,
 } from './models';
 import { TICKS_PER_SECOND } from './time';
 
@@ -58,6 +59,96 @@ export class EditorStore {
   readonly media = computed(() => this.project()?.media ?? []);
   /** True while a file is being dragged over the window. */
   readonly dropActive = signal(false);
+
+  readonly playing = signal(false);
+  /** Export progress in 0..1, or `null` when no export is running. */
+  readonly exportProgress = signal<number | null>(null);
+  readonly sequenceEnd = computed(() => {
+    const sequence = this.activeSequence();
+    return sequence ? sequenceDuration(sequence) : 0;
+  });
+  readonly canExport = computed(
+    () => (this.mediaStatus()?.canExport ?? false) && this.sequenceEnd() > 0,
+  );
+  private playbackFrame: number | null = null;
+
+  /** Starts advancing the playhead in real time; restarts from 0 at the end. */
+  play(): void {
+    const end = this.sequenceEnd();
+    if (this.playing() || end <= 0) {
+      return;
+    }
+    if (this.playhead() >= end) {
+      this.playhead.set(0);
+    }
+    this.playing.set(true);
+    let last: number | null = null;
+    const tick = (now: number) => {
+      if (!this.playing()) {
+        return;
+      }
+      const stop = this.sequenceEnd();
+      const next = this.playhead() + ((now - (last ?? now)) * TICKS_PER_SECOND) / 1000;
+      last = now;
+      if (next >= stop) {
+        this.playhead.set(stop);
+        this.pause();
+      } else {
+        this.playhead.set(Math.round(next));
+        this.playbackFrame = requestAnimationFrame(tick);
+      }
+    };
+    this.playbackFrame = requestAnimationFrame(tick);
+  }
+
+  pause(): void {
+    this.playing.set(false);
+    if (this.playbackFrame !== null) {
+      cancelAnimationFrame(this.playbackFrame);
+      this.playbackFrame = null;
+    }
+  }
+
+  togglePlayback(): void {
+    if (this.playing()) {
+      this.pause();
+    } else {
+      this.play();
+    }
+  }
+
+  stop(): void {
+    this.pause();
+    this.playhead.set(0);
+  }
+
+  async exportSequence(): Promise<void> {
+    const sequence = this.activeSequence();
+    if (!sequence || this.exportProgress() !== null) {
+      return;
+    }
+    this.pause();
+    this.exportProgress.set(0);
+    const ok = await this.run(async () => {
+      const path = await this.backend.exportSequence(sequence.id, sequence.name, (fraction) =>
+        this.exportProgress.set(fraction),
+      );
+      if (path) {
+        this.status.set(`Exported ${path}`);
+      }
+    });
+    this.exportProgress.set(null);
+    if (!ok && this.error()?.includes('cancelled')) {
+      this.error.set(null);
+      this.status.set('Export cancelled');
+    }
+  }
+
+  async cancelExport(): Promise<void> {
+    if (this.exportProgress() !== null) {
+      await this.backend.cancelExport();
+    }
+  }
 
   async newProject(): Promise<void> {
     await this.run(async () => {
@@ -146,6 +237,7 @@ export class EditorStore {
   }
 
   private resetView(snapshot: EditorSnapshot): void {
+    this.pause();
     this.selectedSequenceId.set(null);
     this.selection.set(new Set());
     this.targetTrackId.set(null);
@@ -162,6 +254,7 @@ export class EditorStore {
 
   selectSequence(id: Id): void {
     if (id !== this.activeSequence()?.id) {
+      this.pause();
       this.selectedSequenceId.set(id);
       this.selection.set(new Set());
       this.targetTrackId.set(null);

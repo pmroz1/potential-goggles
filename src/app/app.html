@@ -50,6 +50,34 @@
     </button>
   </nav>
 
+  <div class="transport">
+    <button
+      type="button"
+      class="primary"
+      [title]="store.playing() ? 'Pause (Space)' : 'Play (Space)'"
+      [disabled]="store.sequenceEnd() === 0"
+      (click)="store.togglePlayback()"
+    >
+      {{ store.playing() ? 'Pause' : 'Play' }}
+    </button>
+    <button
+      type="button"
+      title="Stop and return to start"
+      [disabled]="store.sequenceEnd() === 0"
+      (click)="store.stop()"
+    >
+      Stop
+    </button>
+    <button
+      type="button"
+      title="Export the active sequence as MP4"
+      [disabled]="!store.canExport() || store.exportProgress() !== null"
+      (click)="store.exportSequence()"
+    >
+      Export
+    </button>
+  </div>
+
   <div class="actions">
     <button
       type="button"
@@ -116,13 +144,20 @@
   } @else {
     <span>{{ store.status() }}</span>
   }
+  @if (store.exportProgress(); as progress) {
+    <span class="export-progress">Exporting {{ (progress * 100).toFixed(0) }}%</span>
+    <button type="button" class="small" (click)="store.cancelExport()">Cancel</button>
+  } @else if (store.exportProgress() === 0) {
+    <span class="export-progress">Exporting…</span>
+    <button type="button" class="small" (click)="store.cancelExport()">Cancel</button>
+  }
   <span class="spacer"></span>
   @if (store.snapshot()?.clipboard; as clipboard) {
     <span>Clipboard: {{ clipboard.clipCount }} clip{{ clipboard.clipCount === 1 ? '' : 's' }}</span>
   }
   @if (store.mediaStatus(); as media) {
     <span [title]="media.detail"
-      >Media: {{ media.name }} {{ media.available ? 'ready' : 'not linked' }}</span
+      >Media: {{ media.name }} {{ media.available ? 'ready' : 'not found' }}</span
     >
   }
   <span>rev {{ store.project()?.revision ?? 0 }}</span>

@@ -58,7 +58,15 @@ export class App implements OnInit {
     const mod = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
     let handled = true;
-    if (mod && key === 's') {
+    if (!mod && event.key === ' ') {
+      // Space activates focused buttons/clips itself; only toggle playback elsewhere.
+      if (target instanceof Element && target.closest('button, [role="button"]')) {
+        return;
+      }
+      this.store.togglePlayback();
+    } else if (mod && key === 'e') {
+      void this.store.exportSequence();
+    } else if (mod && key === 's') {
       void this.store.saveProject(event.shiftKey);
     } else if (mod && key === 'o') {
       void this.store.openProject();

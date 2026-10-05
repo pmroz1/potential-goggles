@@ -19,7 +19,7 @@ describe('EditorStore', () => {
   it('loads the project with multiple sequences', () => {
     expect(store.sequences().map((s) => s.name)).toEqual(['Main Edit', 'Social Cut']);
     expect(store.activeSequence()?.id).toBe('seq-main');
-    expect(store.mediaStatus()?.available).toBe(false);
+    expect(store.mediaStatus()?.canExport).toBe(true);
   });
 
   it('commits a move as a single edit operation', async () => {
@@ -139,6 +139,87 @@ describe('EditorStore', () => {
     expect(backend.calls.at(-1)).toEqual({
       method: 'saveProject',
       currentPath: '/tmp/test.pgproj',
+    });
+  });
+
+  describe('playback', () => {
+    let frames: FrameRequestCallback[];
+
+    beforeEach(() => {
+      frames = [];
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+      vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    const runFrame = (now: number) => frames.shift()?.(now);
+
+    it('advances the playhead in real time and stops at the end', () => {
+      store.play();
+      expect(store.playing()).toBe(true);
+      runFrame(1000);
+      runFrame(1500);
+      expect(store.playhead()).toBe(secondsToTicks(0.5));
+      runFrame(2500);
+      expect(store.playhead()).toBe(secondsToTicks(1.5));
+      runFrame(1_000_000);
+      expect(store.playing()).toBe(false);
+      expect(store.playhead()).toBe(store.sequenceEnd());
+      expect(store.sequenceEnd()).toBe(secondsToTicks(14));
+    });
+
+    it('restarts from the beginning when played at the end and toggles with pause', () => {
+      store.setPlayhead(store.sequenceEnd());
+      store.togglePlayback();
+      expect(store.playhead()).toBe(0);
+      store.togglePlayback();
+      expect(store.playing()).toBe(false);
+      store.stop();
+      expect(store.playhead()).toBe(0);
+    });
+
+    it('does not play an empty sequence', async () => {
+      await store.newProject();
+      store.play();
+      expect(store.playing()).toBe(false);
+    });
+  });
+
+  describe('export', () => {
+    it('reports progress, returns to idle and records the output path', async () => {
+      let release!: () => void;
+      backend.exportGate = new Promise((resolve) => (release = resolve));
+      const done = store.exportSequence();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(store.exportProgress()).toBe(0.5);
+      release();
+      await done;
+      expect(store.exportProgress()).toBeNull();
+      expect(store.status()).toBe('Exported /tmp/out.mp4');
+      expect(backend.calls.at(-1)).toEqual({
+        method: 'exportSequence',
+        sequenceId: 'seq-main',
+        defaultName: 'Main Edit',
+      });
+    });
+
+    it('treats a cancelled save dialog as a no-op and surfaces failures', async () => {
+      backend.exportResult = null;
+      await store.exportSequence();
+      expect(store.status()).not.toContain('Exported');
+      expect(store.error()).toBeNull();
+      backend.failWith = 'ffmpeg exploded';
+      await store.exportSequence();
+      expect(store.error()).toBe('ffmpeg exploded');
+      expect(store.exportProgress()).toBeNull();
+    });
+
+    it('is unavailable without FFmpeg', async () => {
+      expect(store.canExport()).toBe(true);
+      backend.mediaBackend = { ...backend.mediaBackend, canExport: false };
+      await store.load();
+      expect(store.canExport()).toBe(false);
     });
   });
 });
