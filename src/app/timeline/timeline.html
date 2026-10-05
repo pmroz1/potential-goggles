@@ -44,6 +44,7 @@
               <div
                 class="clip"
                 role="button"
+                tabindex="0"
                 [attr.data-clip-id]="clip.id"
                 [attr.aria-label]="clip.name"
                 [class.selected]="store.selection().has(clip.id)"
@@ -51,6 +52,7 @@
                 [style.width.px]="clipWidth(clip)"
                 [style.--clip-color]="clip.color"
                 (pointerdown)="onClipPointerDown($event, track, clip)"
+                (keydown)="onClipKeyDown($event, track, clip)"
               >
                 <span class="clip-name">{{ clip.name }}</span>
                 <span class="clip-meta">in {{ timecode(clip.source.inPoint) }}</span>

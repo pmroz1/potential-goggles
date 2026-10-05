@@ -41,7 +41,11 @@ export class Timeline implements OnDestroy {
   protected readonly contentWidth = computed(() => {
     const sequence = this.store.activeSequence();
     const duration = sequence
-      ? Math.max(...sequence.tracks.flatMap((t) => t.clips.map((c) => c.start + c.duration)), 0)
+      ? sequence.tracks.reduce(
+          (max, track) =>
+            track.clips.reduce((end, clip) => Math.max(end, clip.start + clip.duration), max),
+          0,
+        )
       : 0;
     return (duration / TICKS_PER_SECOND + 30) * this.store.pixelsPerSecond();
   });
@@ -107,6 +111,7 @@ export class Timeline implements OnDestroy {
     if (event.button !== 0) {
       return;
     }
+
     event.stopPropagation();
     const additive = event.shiftKey || event.ctrlKey || event.metaKey;
     this.store.selectClip(clip.id, additive);
@@ -158,6 +163,15 @@ export class Timeline implements OnDestroy {
         element.style.translate = '';
       },
     });
+  }
+
+  protected onClipKeyDown(event: KeyboardEvent, track: Track, clip: Clip): void {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
+    this.store.selectClip(clip.id, event.shiftKey || event.ctrlKey || event.metaKey);
+    this.store.setTargetTrack(track.id);
   }
 
   ngOnDestroy(): void {

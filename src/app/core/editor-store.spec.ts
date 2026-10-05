@@ -63,7 +63,12 @@ describe('EditorStore', () => {
     expect(ids).toHaveLength(2);
     expect(ids).not.toContain('logo');
     expect(ids).not.toContain('clip-b');
-    expect(store.activeSequence()?.tracks.flatMap((t) => t.clips).filter((c) => ids.includes(c.id))).toHaveLength(2);
+    expect(
+      store
+        .activeSequence()
+        ?.tracks.flatMap((t) => t.clips)
+        .filter((c) => ids.includes(c.id)),
+    ).toHaveLength(2);
     expect(store.status()).toBe('Pasted 2 clips');
   });
 

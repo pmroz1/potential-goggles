@@ -10,6 +10,9 @@
         @let box = layerBox(layer);
         <div
           class="layer"
+          role="button"
+          tabindex="0"
+          [attr.aria-label]="layer.clip.name"
           [attr.data-clip-id]="layer.clip.id"
           [class.selected]="store.selection().has(layer.clip.id)"
           [style.left.px]="box.left"
@@ -22,6 +25,7 @@
           [style.mix-blend-mode]="blendMode(layer.track.blendMode)"
           [style.--clip-color]="layer.clip.color"
           (pointerdown)="onLayerPointerDown($event, layer)"
+          (keydown)="onLayerKeyDown($event, layer)"
         >
           <span class="layer-name">{{ layer.clip.name }}</span>
           <span class="layer-meta">

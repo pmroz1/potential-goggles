@@ -101,5 +101,50 @@ describe('App', () => {
     await fixture.whenStable();
     expect(backend.calls.map((c) => c.method)).toEqual(['copyClips', 'pasteClips']);
     expect(el.querySelector('.status')?.textContent).toContain('Clipboard: 1 clip');
+    const pasted = el.querySelector<HTMLElement>('[data-clip-id="pasted-1"]');
+    expect(pasted).not.toBeNull();
+    expect(pasted?.classList.contains('selected')).toBe(true);
+  });
+
+  it('selects timeline clips from the keyboard for copy and delete', async () => {
+    const { fixture, el } = await render();
+    const clip = el.querySelector<HTMLElement>('.clip[data-clip-id="logo"]')!;
+    clip.focus();
+    clip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await fixture.whenStable();
+    expect(clip.classList.contains('selected')).toBe(true);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true }));
+    await fixture.whenStable();
+    expect(backend.calls[0]).toEqual({
+      method: 'copyClips',
+      sequenceId: 'seq-main',
+      clipIds: ['logo'],
+    });
+  });
+
+  it('selects and nudges viewport layers with the keyboard', async () => {
+    const { fixture, el } = await render();
+    fixture.componentInstance['store'].setPlayhead(secondsToTicks(3));
+    await fixture.whenStable();
+    const layer = el.querySelector<HTMLElement>('.layer[data-clip-id="logo"]')!;
+    layer.focus();
+    layer.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    await fixture.whenStable();
+    expect(layer.classList.contains('selected')).toBe(true);
+    layer.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }),
+    );
+    await fixture.whenStable();
+    expect(backend.calls).toEqual([
+      {
+        method: 'apply',
+        op: {
+          type: 'setClipTransform',
+          sequenceId: 'seq-main',
+          clipId: 'logo',
+          transform: { x: 770, y: -400, scale: 0.2, rotation: 0 },
+        },
+      },
+    ]);
   });
 });

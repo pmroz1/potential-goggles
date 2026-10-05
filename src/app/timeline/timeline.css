@@ -137,6 +137,10 @@
   outline-offset: -2px;
 }
 
+.clip:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
 .clip.dragging {
   z-index: 10;
   cursor: grabbing;
