@@ -23,6 +23,7 @@ import { TICKS_PER_SECOND } from './time';
 export class EditorStore {
   private readonly backend = inject(EditorBackend);
   private readonly pendingTasks = inject(PendingTasks);
+  private clipboardActions: Promise<void> = Promise.resolve();
 
   readonly snapshot = signal<EditorSnapshot | null>(null);
   readonly mediaStatus = signal<MediaBackendStatus | null>(null);
@@ -155,28 +156,39 @@ export class EditorStore {
       this.status.set('Nothing selected to copy');
       return;
     }
-    await this.run(async () => {
-      this.setSnapshot(await this.backend.copyClips(sequenceId, clipIds));
-      this.status.set(`Copied ${clipIds.length} clip${clipIds.length === 1 ? '' : 's'}`);
+    await this.queueClipboardAction(async () => {
+      await this.run(async () => {
+        this.setSnapshot(await this.backend.copyClips(sequenceId, clipIds));
+        this.status.set(`Copied ${clipIds.length} clip${clipIds.length === 1 ? '' : 's'}`);
+      });
     });
   }
 
   /** Pastes the editor clipboard at the playhead, onto the target track if set. */
   async paste(): Promise<void> {
     const sequence = this.activeSequence();
-    if (!sequence || !this.snapshot()?.clipboard) {
-      this.status.set('Clipboard is empty');
-      return;
-    }
     const target = this.targetTrackId();
-    const baseTrackId = target && sequence.tracks.some((t) => t.id === target) ? target : null;
-    await this.run(async () => {
-      const response = await this.backend.pasteClips(sequence.id, this.playhead(), baseTrackId);
-      this.applyResponse(response);
-      this.selection.set(new Set(response.outcome.createdClipIds));
-      const count = response.outcome.createdClipIds.length;
-      this.status.set(`Pasted ${count} clip${count === 1 ? '' : 's'}`);
+    const at = this.playhead();
+    await this.queueClipboardAction(async () => {
+      if (!sequence || !this.snapshot()?.clipboard) {
+        this.status.set('Clipboard is empty');
+        return;
+      }
+      const baseTrackId = target && sequence.tracks.some((t) => t.id === target) ? target : null;
+      await this.run(async () => {
+        const response = await this.backend.pasteClips(sequence.id, at, baseTrackId);
+        this.applyResponse(response);
+        this.selection.set(new Set(response.outcome.createdClipIds));
+        const count = response.outcome.createdClipIds.length;
+        this.status.set(`Pasted ${count} clip${count === 1 ? '' : 's'}`);
+      });
     });
+  }
+
+  private queueClipboardAction(action: () => Promise<void>): Promise<void> {
+    const pending = this.clipboardActions.then(action);
+    this.clipboardActions = pending.catch(() => {});
+    return pending;
   }
 
   async undo(): Promise<void> {

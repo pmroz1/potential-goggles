@@ -59,7 +59,30 @@ describe('EditorStore', () => {
       at: secondsToTicks(30),
       baseTrackId: 'v1',
     });
-    expect([...store.selection()]).toEqual(['clip-a']);
+    const ids = [...store.selection()];
+    expect(ids).toHaveLength(2);
+    expect(ids).not.toContain('logo');
+    expect(ids).not.toContain('clip-b');
+    expect(store.activeSequence()?.tracks.flatMap((t) => t.clips).filter((c) => ids.includes(c.id))).toHaveLength(2);
+    expect(store.status()).toBe('Pasted 2 clips');
+  });
+
+  it('waits for an in-flight copy before checking the clipboard', async () => {
+    store.selectClip('logo', false);
+    const originalCopy = backend.copyClips.bind(backend);
+    let finishCopy!: () => void;
+    backend.copyClips = async (sequenceId, clipIds) => {
+      await new Promise<void>((resolve) => (finishCopy = resolve));
+      return originalCopy(sequenceId, clipIds);
+    };
+    const copying = store.copySelection();
+    const pasting = store.paste();
+    await Promise.resolve();
+    expect(backend.calls).toEqual([]);
+    finishCopy();
+    await Promise.all([copying, pasting]);
+    expect(backend.calls.map((call) => call.method)).toEqual(['copyClips', 'pasteClips']);
+    expect(store.selection()).toEqual(new Set(['pasted-1']));
     expect(store.status()).toBe('Pasted 1 clip');
   });
 
