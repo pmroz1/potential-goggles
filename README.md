@@ -1,6 +1,33 @@
 # Potential Goggles
 
-A desktop-only, performance-oriented video editor (early foundation).
+[![CI](https://github.com/pmroz1/potential-goggles/actions/workflows/ci.yml/badge.svg)](https://github.com/pmroz1/potential-goggles/actions/workflows/ci.yml)
+[![Windows release](https://github.com/pmroz1/potential-goggles/actions/workflows/release-windows.yml/badge.svg)](https://github.com/pmroz1/potential-goggles/actions/workflows/release-windows.yml)
+
+A desktop-only, performance-oriented video editor in its early stages. Arrange
+clips across video and audio tracks, adjust layers in the viewport, and undo or
+redo edits. Media decoding and export are not available yet; the viewport shows
+placeholders rather than decoded video.
+
+## Preview
+
+The previews below show the editor with its sample project and placeholder media:
+
+![Editor workspace with viewport and layered timeline](docs/images/editor-workspace.png)
+
+![Editor with a selected clip and its inspector](docs/images/clip-inspector.png)
+
+## Windows download
+
+Download the latest Windows `.exe` installer from
+[Releases](https://github.com/pmroz1/potential-goggles/releases). The installer
+is currently unsigned, so Windows may show a SmartScreen warning. Releases do
+not include a standalone portable executable.
+
+Maintainers: run the [Windows release workflow](https://github.com/pmroz1/potential-goggles/actions/workflows/release-windows.yml)
+manually to download an installer from its `windows-installer` build artifact,
+or push a `v*` tag (for example, `v0.1.0`) to build an installer and publish it
+as a GitHub Release asset. Match the tag to the version in
+`src-tauri/tauri.conf.json` and `Cargo.toml` before tagging.
 
 | Layer            | Technology                                   | Location               |
 | ---------------- | -------------------------------------------- | ---------------------- |
