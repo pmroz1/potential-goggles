@@ -27,6 +27,7 @@ export class Timeline implements OnDestroy {
   private readonly injector = inject(Injector);
   private readonly lanesRef = viewChild.required<ElementRef<HTMLElement>>('lanes');
   private readonly rulerRef = viewChild.required<ElementRef<HTMLElement>>('ruler');
+  /** Cancels the most recent drag; a no-op once that drag has finished. */
   private cancelDrag: (() => void) | null = null;
 
   protected readonly laneHeight = LANE_HEIGHT;
@@ -47,8 +48,11 @@ export class Timeline implements OnDestroy {
 
   protected readonly rulerMarks = computed(() => {
     const pps = this.store.pixelsPerSecond();
-    const step = pps >= 60 ? 1 : pps >= 20 ? 5 : 10;
     const seconds = this.contentWidth() / pps;
+    // Keep labels ≥ ~60 px apart and bound the number of DOM nodes.
+    const step =
+      [1, 2, 5, 10, 15, 30, 60, 120, 300, 600].find((s) => s * pps >= 60 && seconds / s <= 500) ??
+      600;
     const marks: { x: number; label: string }[] = [];
     for (let s = 0; s <= seconds; s += step) {
       marks.push({ x: s * pps, label: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` });
@@ -95,7 +99,6 @@ export class Timeline implements OnDestroy {
         if (!cancelled) {
           scrub(x);
         }
-        this.cancelDrag = null;
       },
     });
   }
@@ -140,7 +143,6 @@ export class Timeline implements OnDestroy {
         element.style.translate = `${result.offsetX}px ${result.offsetY}px`;
       },
       onEnd: async (x, y, cancelled) => {
-        this.cancelDrag = null;
         const result = computeClipDrag(ctx, x, y);
         const changed = result.start !== clip.start || result.track.id !== track.id;
         element.classList.remove('dragging', 'invalid');

@@ -41,7 +41,11 @@ export class App implements OnInit {
       void this.store.redo();
     } else if (mod && key === 'z') {
       void this.store.undo();
-    } else if (!mod && (event.key === 'Delete' || event.key === 'Backspace')) {
+    } else if (
+      !mod &&
+      (event.key === 'Delete' || event.key === 'Backspace') &&
+      this.store.selection().size > 0
+    ) {
       void this.store.deleteSelection();
     } else {
       handled = false;

@@ -15,6 +15,7 @@ import { EditorStore } from '../core/editor-store';
 import { BlendMode, Clip, MediaSource, Sequence, Ticks, Track, tracksByZ } from '../core/models';
 import { startPointerDrag } from '../core/pointer-drag';
 import { formatTimecode } from '../core/time';
+import { DRAG_THRESHOLD } from '../timeline/timeline-geometry';
 
 export interface ViewportLayer {
   track: Track;
@@ -155,11 +156,10 @@ export class Viewport {
         element.style.translate = `${x - originX}px ${y - originY}px`;
       },
       onEnd: async (x, y, cancelled) => {
-        this.cancelDrag = null;
         element.classList.remove('dragging');
         const dx = (x - originX) / scale;
         const dy = (y - originY) / scale;
-        if (!cancelled && Math.hypot(x - originX, y - originY) >= 1) {
+        if (!cancelled && Math.hypot(x - originX, y - originY) >= DRAG_THRESHOLD) {
           const round = (v: number) => Math.round(v * 100) / 100;
           const transform = { ...origin, x: round(origin.x + dx), y: round(origin.y + dy) };
           if (await this.store.setClipTransform(layer.clip.id, transform)) {
