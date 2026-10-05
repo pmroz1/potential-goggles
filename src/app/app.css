@@ -1,0 +1,77 @@
+:host {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) minmax(180px, 38%) auto;
+  height: 100vh;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.project-name {
+  font-weight: 600;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  overflow-x: auto;
+}
+
+.tab {
+  border-radius: 4px 4px 0 0;
+  border-bottom: 2px solid transparent;
+}
+
+.tab.active {
+  border-bottom-color: var(--accent);
+  color: #fff;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline {
+  min-height: 0;
+}
+
+.status {
+  display: flex;
+  gap: 16px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border-top: 1px solid var(--border);
+}
+
+.status .spacer {
+  flex: 1;
+}
+
+.status .error {
+  color: var(--danger);
+}
