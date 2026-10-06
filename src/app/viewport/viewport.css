@@ -66,8 +66,15 @@
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
+  place-content: center;
+  gap: 6px;
+  text-align: center;
   color: var(--muted);
+}
+
+.empty strong {
+  font-size: 16px;
+  color: var(--text);
 }
 
 .info {

@@ -131,7 +131,10 @@ export type BackendCall =
   | { method: 'apply'; op: EditOp }
   | { method: 'copyClips'; sequenceId: Id; clipIds: Id[] }
   | { method: 'pasteClips'; sequenceId: Id; at: Ticks; baseTrackId: Id | null }
-  | { method: 'undo' | 'redo' };
+  | { method: 'undo' | 'redo' | 'newProject' | 'openProject' | 'cancelExport' }
+  | { method: 'exportSequence'; sequenceId: Id; defaultName: string }
+  | { method: 'saveProject'; currentPath: string | null }
+  | { method: 'importMedia'; paths?: string[] };
 
 /**
  * In-memory backend that records every call. `apply` for `moveClip` and
@@ -147,6 +150,7 @@ export class FakeEditorBackend extends EditorBackend {
     canUndo: false,
     canRedo: false,
     clipboard: null,
+    path: null,
   };
 
   async getState(): Promise<EditorSnapshot> {
@@ -168,6 +172,26 @@ export class FakeEditorBackend extends EditorBackend {
       } else {
         clip.transform = op.transform;
       }
+    }
+    if (op.type === 'renameProject') {
+      project.name = op.name;
+    }
+    if (op.type === 'addClip') {
+      const track = project.sequences
+        .find((q) => q.id === op.sequenceId)!
+        .tracks.find((t) => t.id === op.trackId)!;
+      const source = project.media.find((m) => m.id === op.sourceId)!;
+      track.clips.push({
+        id: `added-${project.revision}`,
+        name: source.name,
+        source: { sourceId: source.id, inPoint: 0 },
+        start: op.start,
+        duration: op.duration ?? source.duration,
+        transform,
+        opacity: 1,
+        color: '#4f7cff',
+      });
+      track.clips.sort((a, b) => a.start - b.start);
     }
     project.revision += 1;
     this.snapshot = { ...this.snapshot, canUndo: true };
@@ -237,14 +261,80 @@ export class FakeEditorBackend extends EditorBackend {
     };
   }
 
-  async mediaStatus(): Promise<MediaBackendStatus> {
-    return {
-      name: 'ffmpeg',
-      available: false,
-      canDecode: false,
-      canExport: false,
-      detail: 'not linked',
+  async newProject(): Promise<EditorSnapshot> {
+    this.calls.push({ method: 'newProject' });
+    this.snapshot = {
+      project: { id: 'new', name: 'Untitled Project', revision: 0, media: [], sequences: [] },
+      canUndo: false,
+      canRedo: false,
+      clipboard: null,
+      path: null,
     };
+    return structuredClone(this.snapshot);
+  }
+
+  async openProject(): Promise<EditorSnapshot | null> {
+    this.calls.push({ method: 'openProject' });
+    return null;
+  }
+
+  async saveProject(currentPath: string | null): Promise<EditorSnapshot | null> {
+    this.calls.push({ method: 'saveProject', currentPath });
+    this.throwIfFailing();
+    this.snapshot = { ...this.snapshot, path: currentPath ?? '/tmp/test.pgproj' };
+    return structuredClone(this.snapshot);
+  }
+
+  async importMedia(paths?: string[]): Promise<EditorSnapshot | null> {
+    this.calls.push({ method: 'importMedia', paths });
+    this.throwIfFailing();
+    for (const path of paths ?? []) {
+      this.snapshot.project.media.push({
+        id: `imported-${this.snapshot.project.media.length}`,
+        name: path.split('/').pop()!,
+        path,
+        kind: 'video',
+        duration: s(10),
+        width: 1920,
+        height: 1080,
+      });
+    }
+    return structuredClone(this.snapshot);
+  }
+
+  exportResult: string | null = '/tmp/out.mp4';
+  exportGate: Promise<void> | null = null;
+
+  async exportSequence(
+    sequenceId: Id,
+    defaultName: string,
+    onProgress: (fraction: number) => void,
+  ): Promise<string | null> {
+    this.calls.push({ method: 'exportSequence', sequenceId, defaultName });
+    this.throwIfFailing();
+    onProgress(0.5);
+    await this.exportGate;
+    return this.exportResult;
+  }
+
+  async cancelExport(): Promise<void> {
+    this.calls.push({ method: 'cancelExport' });
+  }
+
+  async onFilesDropped(): Promise<() => void> {
+    return () => undefined;
+  }
+
+  mediaBackend: MediaBackendStatus = {
+    name: 'ffmpeg',
+    available: true,
+    canDecode: false,
+    canExport: true,
+    detail: 'ffmpeg test',
+  };
+
+  async mediaStatus(): Promise<MediaBackendStatus> {
+    return this.mediaBackend;
   }
 
   private throwIfFailing(): void {

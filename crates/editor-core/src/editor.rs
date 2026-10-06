@@ -31,6 +31,11 @@ impl Editor {
         }
     }
 
+    /// Replaces the whole project (new/open) and resets history and clipboard.
+    pub fn replace_project(&mut self, project: Project) {
+        *self = Self::new(project);
+    }
+
     pub fn project(&self) -> &Project {
         &self.project
     }

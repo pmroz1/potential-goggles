@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::clipboard::ClipboardPayload;
 use crate::error::EditError;
+use crate::ids::SourceId;
 use crate::ids::{ClipId, SequenceId, TrackId};
-use crate::model::{Clip, Project, Resolution, Sequence, TrackKind, Transform};
+use crate::model::{Clip, MediaKind, MediaSource, Project, Resolution, Sequence, SourceRef, TrackKind, Transform};
 use crate::time::{FrameRate, Ticks, TimeRange};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,6 +41,19 @@ pub enum EditOp {
         at: Ticks,
         base_track_id: Option<TrackId>,
     },
+    /// Add a media file to the project's media pool.
+    ImportMedia { source: MediaSource },
+    /// Place a clip covering `duration` ticks of a media source on a track.
+    /// A `duration` of `None` uses the whole source.
+    AddClip {
+        sequence_id: SequenceId,
+        track_id: TrackId,
+        source_id: SourceId,
+        start: Ticks,
+        duration: Option<Ticks>,
+    },
+    /// Rename the project.
+    RenameProject { name: String },
     /// Add a new sequence with the default track layout.
     AddSequence {
         name: String,
@@ -55,6 +69,7 @@ pub struct EditOutcome {
     pub revision: u64,
     pub created_clip_ids: Vec<ClipId>,
     pub created_sequence_id: Option<SequenceId>,
+    pub created_source_id: Option<SourceId>,
 }
 
 /// Applies `op` to `project`. On error the project may be partially modified,
@@ -109,6 +124,70 @@ pub fn apply(project: &mut Project, op: &EditOp) -> Result<EditOutcome, EditErro
             base_track_id,
         } => {
             outcome.created_clip_ids = paste_clips(project, *sequence_id, payload, *at, *base_track_id)?;
+        }
+        EditOp::ImportMedia { source } => {
+            if source.duration <= Ticks::ZERO {
+                return Err(EditError::InvalidDuration);
+            }
+            let mut source = source.clone();
+            // The pool owns identity: never trust or collide with caller ids.
+            if project.source(source.id).is_some() {
+                source.id = SourceId::new();
+            }
+            outcome.created_source_id = Some(source.id);
+            project.media.push(source);
+        }
+        EditOp::AddClip {
+            sequence_id,
+            track_id,
+            source_id,
+            start,
+            duration,
+        } => {
+            let source = project
+                .source(*source_id)
+                .ok_or(EditError::SourceNotFound(*source_id))?
+                .clone();
+            let duration = duration.unwrap_or(source.duration);
+            if duration <= Ticks::ZERO || duration > source.duration {
+                return Err(EditError::InvalidDuration);
+            }
+            let kind = match source.kind {
+                MediaKind::Audio => TrackKind::Audio,
+                MediaKind::Video | MediaKind::Image => TrackKind::Video,
+            };
+            let sequence = sequence_mut(project, *sequence_id)?;
+            let track = sequence
+                .track_mut(*track_id)
+                .ok_or(EditError::TrackNotFound(*track_id))?;
+            let clip = Clip {
+                id: ClipId::new(),
+                name: source.name.clone(),
+                source: SourceRef {
+                    source_id: source.id,
+                    in_point: Ticks::ZERO,
+                },
+                start: *start,
+                duration,
+                transform: Transform::default(),
+                opacity: 1.0,
+                color: match source.kind {
+                    MediaKind::Video => "#4f7cff",
+                    MediaKind::Audio => "#3fb27f",
+                    MediaKind::Image => "#ff9f43",
+                }
+                .to_owned(),
+            };
+            check_placement(track, kind, clip.range(), None)?;
+            outcome.created_clip_ids.push(clip.id);
+            track.insert_sorted(clip);
+        }
+        EditOp::RenameProject { name } => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(EditError::EmptyName);
+            }
+            project.name = name.to_owned();
         }
         EditOp::AddSequence {
             name,

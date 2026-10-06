@@ -5,7 +5,8 @@
   --border: #2f343e;
   --text: #d9dde5;
   --muted: #8a92a3;
-  --accent: #4f9dff;
+  --accent: #5b9cff;
+  --accent-strong: #3b82f6;
   --danger: #ff5c5c;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: dark;
@@ -27,9 +28,12 @@ body {
 }
 
 button {
-  padding: 4px 10px;
+  padding: 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
   background: var(--panel);
   color: var(--text);
   font: inherit;
@@ -38,6 +42,30 @@ button {
 
 button:hover:not(:disabled) {
   border-color: var(--accent);
+}
+
+button:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+button.primary {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+button.small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 button:disabled {

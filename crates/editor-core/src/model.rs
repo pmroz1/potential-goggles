@@ -28,6 +28,20 @@ impl Project {
         }
     }
 
+    /// A new project containing one empty sequence (1080p30, tracks V1, V2, A1).
+    pub fn blank(name: impl Into<String>) -> Self {
+        let mut project = Self::new(name);
+        project.sequences.push(Sequence::with_default_tracks(
+            "Sequence 1",
+            FrameRate::new(30, 1),
+            Resolution {
+                width: 1920,
+                height: 1080,
+            },
+        ));
+        project
+    }
+
     pub fn sequence(&self, id: SequenceId) -> Option<&Sequence> {
         self.sequences.iter().find(|s| s.id == id)
     }
