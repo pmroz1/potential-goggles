@@ -14,8 +14,14 @@
   background: #0b0c0f;
 }
 
-.stage {
+.frame {
   position: relative;
+  flex: none;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   background: #000;
   box-shadow: 0 0 0 1px var(--border);
@@ -24,6 +30,8 @@
 
 .layer {
   position: absolute;
+  /* left/top is the clip centre; rotate and scale around it. */
+  transform-origin: 0 0;
   transform: translate(-50%, -50%);
   box-sizing: border-box;
   display: flex;
@@ -37,7 +45,59 @@
   cursor: move;
   touch-action: none;
   user-select: none;
-  will-change: translate;
+  will-change: translate, scale;
+}
+
+.layer.has-media {
+  border-color: transparent;
+  background: transparent;
+}
+
+.layer.has-media .layer-label {
+  display: none;
+}
+
+.media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* The box already has the clip's proportions; stretching follows the transform. */
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+.layer-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  text-align: center;
+}
+
+.layer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.layer-status.error {
+  color: #ffb4a8;
+}
+
+.layer-status.overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
 }
 
 .layer.selected {
@@ -48,8 +108,78 @@
   outline: 2px solid var(--accent);
 }
 
-.layer.dragging {
+.layer.dragging,
+.layer.resizing {
   outline: 2px dashed #fff;
+}
+
+.selection-box {
+  position: absolute;
+  transform-origin: 0 0;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Kept in the DOM (not display: none) so pointer capture on a handle survives. */
+.frame.dragging .selection-box {
+  opacity: 0;
+}
+
+.handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: #fff;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.handle[data-handle='nw'] {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.handle[data-handle='n'] {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.handle[data-handle='ne'] {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.handle[data-handle='e'] {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.handle[data-handle='se'] {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.handle[data-handle='s'] {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.handle[data-handle='sw'] {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.handle[data-handle='w'] {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
 }
 
 .layer-name {

@@ -222,4 +222,85 @@ describe('EditorStore', () => {
       expect(store.canExport()).toBe(false);
     });
   });
+
+  it('adds a track, targets it and removes it again', async () => {
+    await store.addTrack('video');
+    const added = store.activeSequence()!.tracks.find((t) => t.name === 'V3')!;
+    expect(added.zIndex).toBe(3);
+    expect(store.targetTrackId()).toBe(added.id);
+    await store.removeTrack(added.id);
+    expect(store.activeSequence()!.tracks.some((t) => t.id === added.id)).toBe(false);
+    expect(store.targetTrackId()).toBeNull();
+    expect(backend.calls.map((c) => c.method === 'apply' && c.op.type)).toEqual([
+      'addTrack',
+      'removeTrack',
+    ]);
+  });
+
+  it('changes the sequence frame size only when it differs', async () => {
+    await store.setSequenceResolution({ width: 1920, height: 1080 });
+    expect(backend.calls).toEqual([]);
+    await store.setSequenceResolution({ width: 1080, height: 1920 });
+    expect(store.activeSequence()!.resolution).toEqual({ width: 1080, height: 1920 });
+  });
+
+  it('fits a clip to the frame and resizes it to an exact size', async () => {
+    expect(await store.fitClip('logo', 'stretch')).toBe(true);
+    expect(await store.setClipSize('logo', 960, 540)).toBe(true);
+    expect(await store.setClipSize('logo', 0, 540)).toBe(false);
+    const ops = backend.calls.map((c) => (c.method === 'apply' ? c.op : null));
+    expect(ops).toEqual([
+      expect.objectContaining({ transform: expect.objectContaining({ x: 0, y: 0, scale: 1 }) }),
+      expect.objectContaining({
+        transform: expect.objectContaining({ scale: 1, scaleX: 0.5, scaleY: 0.5 }),
+      }),
+    ]);
+  });
+
+  it('shows import placeholders and an activity while importing', async () => {
+    let release!: () => void;
+    backend.importGate = new Promise((resolve) => (release = resolve));
+    backend.chosenFiles = ['/clips/a.mkv', 'C:\\clips\\b.txt'];
+    const done = store.importMedia();
+    await vi.waitFor(() => expect(store.importing().length).toBe(2));
+    expect(store.importing().map((i) => i.label)).toEqual(['a.mkv', 'b.txt']);
+    expect(store.activity()).toBe('Importing 2 files…');
+    release();
+    await done;
+    expect(store.importing()).toEqual([]);
+    expect(store.activity()).toBeNull();
+    expect(store.status()).toBe('Imported 1 file (1 unsupported skipped)');
+  });
+
+  it('loads previews for sources on the timeline and converts on failure', async () => {
+    TestBed.tick();
+    await vi.waitFor(() => expect(store.previews().get('src-video')?.status).toBe('ready'));
+    expect(backend.previewRequests).toEqual([
+      { sourceId: 'src-video', convert: false },
+      { sourceId: 'src-logo', convert: false },
+    ]);
+    expect(backend.calls).toEqual([]);
+
+    store.previewFailed('src-video');
+    await vi.waitFor(() =>
+      expect(store.previews().get('src-video')).toEqual({
+        status: 'ready',
+        url: 'asset://converted/src-video',
+        converted: true,
+      }),
+    );
+    store.previewFailed('src-video');
+    expect(store.previews().get('src-video')?.status).toBe('error');
+  });
+
+  it('reports preview errors from the backend', async () => {
+    backend.previewError = 'FFmpeg was not found';
+    TestBed.tick();
+    await vi.waitFor(() =>
+      expect(store.previews().get('src-logo')).toEqual({
+        status: 'error',
+        message: 'FFmpeg was not found',
+      }),
+    );
+  });
 });

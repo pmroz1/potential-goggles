@@ -37,7 +37,12 @@ export interface MediaSource {
 export interface Transform {
   x: number;
   y: number;
+  /** Uniform scale (keeps the source proportions). */
   scale: number;
+  /** Horizontal stretch on top of `scale` (1 = source proportions). */
+  scaleX: number;
+  /** Vertical stretch on top of `scale` (1 = source proportions). */
+  scaleY: number;
   rotation: number;
 }
 
@@ -106,6 +111,7 @@ export interface EditOutcome {
   createdClipIds: Id[];
   createdSequenceId: Id | null;
   createdSourceId?: Id | null;
+  createdTrackId?: Id | null;
 }
 
 export interface EditResponse {
@@ -128,7 +134,10 @@ export type EditOp =
       duration: Ticks | null;
     }
   | { type: 'renameProject'; name: string }
-  | { type: 'addSequence'; name: string; frameRate: FrameRate; resolution: Resolution };
+  | { type: 'addSequence'; name: string; frameRate: FrameRate; resolution: Resolution }
+  | { type: 'setSequenceResolution'; sequenceId: Id; resolution: Resolution }
+  | { type: 'addTrack'; sequenceId: Id; kind: TrackKind; name: string | null }
+  | { type: 'removeTrack'; sequenceId: Id; trackId: Id };
 
 export interface MediaBackendStatus {
   name: string;

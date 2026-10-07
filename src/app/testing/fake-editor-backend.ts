@@ -14,7 +14,7 @@ import {
 import { secondsToTicks } from '../core/time';
 
 const s = secondsToTicks;
-const transform = { x: 0, y: 0, scale: 1, rotation: 0 };
+const transform = { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, rotation: 0 };
 
 /** Small fixture mirroring `editor_core::demo::demo_project`. */
 export function fixtureProject(): Project {
@@ -108,7 +108,7 @@ export function fixtureProject(): Project {
                 source: { sourceId: 'src-logo', inPoint: 0 },
                 start: s(2),
                 duration: s(12),
-                transform: { x: 760, y: -400, scale: 0.2, rotation: 0 },
+                transform: { ...transform, x: 760, y: -400, scale: 0.2 },
                 opacity: 1,
                 color: '#ff9f43',
               },
@@ -134,7 +134,8 @@ export type BackendCall =
   | { method: 'undo' | 'redo' | 'newProject' | 'openProject' | 'cancelExport' }
   | { method: 'exportSequence'; sequenceId: Id; defaultName: string }
   | { method: 'saveProject'; currentPath: string | null }
-  | { method: 'importMedia'; paths?: string[] };
+  | { method: 'chooseMediaFiles' }
+  | { method: 'importMedia'; paths: string[] };
 
 /**
  * In-memory backend that records every call. `apply` for `moveClip` and
@@ -176,6 +177,34 @@ export class FakeEditorBackend extends EditorBackend {
     if (op.type === 'renameProject') {
       project.name = op.name;
     }
+    let createdTrackId: Id | null = null;
+    if (
+      op.type === 'addTrack' ||
+      op.type === 'removeTrack' ||
+      op.type === 'setSequenceResolution'
+    ) {
+      const sequence = project.sequences.find((q) => q.id === op.sequenceId)!;
+      if (op.type === 'setSequenceResolution') {
+        sequence.resolution = op.resolution;
+      } else if (op.type === 'removeTrack') {
+        sequence.tracks = sequence.tracks.filter((t) => t.id !== op.trackId);
+      } else {
+        const zs = sequence.tracks.map((t) => t.zIndex);
+        const count = sequence.tracks.filter((t) => t.kind === op.kind).length;
+        createdTrackId = `track-${project.revision}`;
+        sequence.tracks.push({
+          id: createdTrackId,
+          name: op.name ?? `${op.kind === 'video' ? 'V' : 'A'}${count + 1}`,
+          kind: op.kind,
+          zIndex: op.kind === 'video' ? Math.max(0, ...zs) + 1 : Math.min(0, ...zs) - 1,
+          blendMode: 'normal',
+          visible: true,
+          muted: false,
+          locked: false,
+          clips: [],
+        });
+      }
+    }
     if (op.type === 'addClip') {
       const track = project.sequences
         .find((q) => q.id === op.sequenceId)!
@@ -197,7 +226,12 @@ export class FakeEditorBackend extends EditorBackend {
     this.snapshot = { ...this.snapshot, canUndo: true };
     return {
       snapshot: structuredClone(this.snapshot),
-      outcome: { revision: project.revision, createdClipIds: [], createdSequenceId: null },
+      outcome: {
+        revision: project.revision,
+        createdClipIds: [],
+        createdSequenceId: null,
+        createdTrackId,
+      },
     };
   }
 
@@ -285,10 +319,21 @@ export class FakeEditorBackend extends EditorBackend {
     return structuredClone(this.snapshot);
   }
 
-  async importMedia(paths?: string[]): Promise<EditorSnapshot | null> {
+  chosenFiles: string[] | null = null;
+
+  async chooseMediaFiles(): Promise<string[] | null> {
+    this.calls.push({ method: 'chooseMediaFiles' });
+    return this.chosenFiles;
+  }
+
+  /** Resolves when released; lets tests observe the in-progress state. */
+  importGate: Promise<void> | null = null;
+
+  async importMedia(paths: string[]): Promise<EditorSnapshot> {
     this.calls.push({ method: 'importMedia', paths });
+    await this.importGate;
     this.throwIfFailing();
-    for (const path of paths ?? []) {
+    for (const path of paths.filter((p) => !p.endsWith('.txt'))) {
       this.snapshot.project.media.push({
         id: `imported-${this.snapshot.project.media.length}`,
         name: path.split('/').pop()!,
@@ -300,6 +345,18 @@ export class FakeEditorBackend extends EditorBackend {
       });
     }
     return structuredClone(this.snapshot);
+  }
+
+  /** Preview requests (kept apart from `calls`, which tracks edits). */
+  readonly previewRequests: { sourceId: Id; convert: boolean }[] = [];
+  previewError: string | null = null;
+
+  async previewUrl(sourceId: Id, convert: boolean): Promise<string> {
+    this.previewRequests.push({ sourceId, convert });
+    if (this.previewError) {
+      throw this.previewError;
+    }
+    return `asset://${convert ? 'converted/' : ''}${sourceId}`;
   }
 
   exportResult: string | null = '/tmp/out.mp4';

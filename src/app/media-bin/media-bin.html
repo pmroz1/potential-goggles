@@ -2,13 +2,18 @@
   <span class="title">Media</span>
   <button type="button" class="primary small" (click)="store.importMedia()">Import</button>
 </div>
-<div class="items">
+<div class="items" [attr.aria-busy]="store.importing().length > 0">
   @for (source of store.media(); track source.id) {
     <div class="item">
       <span class="badge" [attr.data-kind]="source.kind">{{ source.kind }}</span>
       <span class="meta">
         <span class="name" [title]="source.path">{{ source.name }}</span>
-        <span class="sub">{{ seconds(source.duration) }}</span>
+        <span class="sub">
+          {{ seconds(source.duration) }}
+          @if (source.width && source.height) {
+            · {{ source.width }}×{{ source.height }}
+          }
+        </span>
       </span>
       <button
         type="button"
@@ -20,7 +25,17 @@
         + Add
       </button>
     </div>
-  } @empty {
+  }
+  @for (file of store.importing(); track file.id) {
+    <div class="item importing" role="status">
+      <span class="badge loading"><span class="spinner" aria-hidden="true"></span></span>
+      <span class="meta">
+        <span class="name" [title]="file.label">{{ file.label }}</span>
+        <span class="sub">Importing…</span>
+      </span>
+    </div>
+  }
+  @if (store.media().length === 0 && store.importing().length === 0) {
     <div class="empty">
       <p>No media yet.</p>
       <p class="hint">Click Import or drop video, audio and image files anywhere in the window.</p>
