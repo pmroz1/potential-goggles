@@ -9,15 +9,33 @@ redo edits. Create, open and save projects (`.pgproj`), import media by button o
 by dropping files into the window, and add them to the timeline.
 
 - **Playback** (Space, or Play/Pause/Stop) advances the playhead in real time.
-  The viewport shows placeholder layers rather than decoded video, and there is
-  no audio output yet.
+  The viewport shows the actual video frames and images of every visible layer.
+  Preview audio is muted (there is no audio output yet).
+- **Formats**: MP4, MOV, M4V and WebM video and PNG, JPEG, GIF, WebP and BMP images
+  are previewed directly. Other formats (MKV, AVI, WMV, FLV, MPEG/TS, MXF, 3GP, OGV,
+  DV, …; TIFF, TGA, AVIF, HEIC, JPEG XL images) and any other file FFmpeg can probe
+  are imported too; their previews are converted once with FFmpeg and cached in the
+  temp folder. Files a direct preview can't decode (e.g. an unsupported codec inside
+  an MP4) fall back to conversion automatically. Audio files (WAV, MP3, AAC, FLAC, OGG, Opus, …) go on audio tracks.
+- **Loading feedback**: imports show placeholders in the media bin and an activity
+  spinner in the status bar; layers show "Loading preview…" / "Converting for preview…"
+  until their media is ready.
+- **Tracks**: add tracks with **+ Video** (on top of the stack) / **+ Audio** below the
+  timeline headers, and remove one with **×** on its header (undoable; locked tracks
+  can't be removed).
+- **Resizing**: select a layer in the viewport and drag its handles. Corner handles
+  keep the proportions (hold Shift to resize freely); edge handles stretch one side.
+  The inspector sets an exact width/height and offers **Fit**, **Fill**, **Stretch**
+  and **Original** (restore the source proportions). The **Sequence → Frame** menu
+  changes the video's proportions (16:9, 9:16, 1:1, 4:5, 4:3, 21:9, 4K, or a custom size).
 - **Export** (Ctrl/Cmd+E) renders the active sequence to MP4 (H.264/AAC) at the
   sequence's resolution and frame rate, compositing video tracks with their
   transforms, opacity and blend modes and mixing audio-track clips. Audio
   embedded in video clips is not included.
-- Export and media probing (real durations and sizes on import) need
+- Export, media probing (real durations and sizes on import) and preview conversion need
   [FFmpeg](https://ffmpeg.org/) (`ffmpeg` and `ffprobe`) on your `PATH`; it is not
-  bundled with the installer. Without it, Export is disabled.
+  bundled with the installer. Without it, Export is disabled and only formats the
+  webview plays natively can be previewed.
 
 ## Preview
 
@@ -81,14 +99,16 @@ for its backend, so use `npm run tauri dev` for development.
 - **Track** → video or audio, with an explicit `zIndex` that defines compositing order
   (higher is drawn on top) plus blend mode, visibility, mute and lock flags.
 - **Clip** → a `SourceRef` (source id + in point), a timeline `start` and `duration`,
-  a spatial `transform` and `opacity`. Clips on a track never overlap.
+  a spatial `transform` (position, uniform `scale`, per-axis `scaleX`/`scaleY` stretch and
+  rotation) and `opacity`. Clips on a track never overlap.
 - Time is stored as integer **ticks** (705,600,000 per second, the "flick"), which divides
   evenly into common frame rates (incl. 29.97/59.94) and audio sample rates.
 
 ### Edit operations
 
 All project mutations are serializable `EditOp`s (`moveClip`, `setClipTransform`,
-`deleteClips`, `pasteClips`, `addSequence`) applied atomically by `Editor`: an operation
+`deleteClips`, `pasteClips`, `addSequence`, `addTrack`, `removeTrack`,
+`setSequenceResolution`, …) applied atomically by `Editor`: an operation
 either fully succeeds and becomes one undo step, or is rejected and leaves the project untouched.
 
 ### Pointer interaction and IPC
@@ -99,7 +119,7 @@ Dragging clips on the timeline or layers in the viewport is handled entirely in 
 - moves are coalesced to one update per animation frame and applied as a CSS `translate`
   on the dragged element only (with frame snapping and local placement pre-validation);
 - **no IPC happens during the drag** — on release a single `moveClip` / `setClipTransform`
-  operation is committed to the Rust core, which validates it and returns the new snapshot.
+  operation (resize handles work the same way, previewing with a CSS `scale`) is committed to the Rust core, which validates it and returns the new snapshot.
 
 ### Clipboard
 
@@ -116,6 +136,8 @@ selected clips. Click/drag the ruler to move the playhead.
 
 ### Media / FFmpeg
 
-`crates/media` defines the `MediaBackend` trait (probe, frame decoding, export). FFmpeg is not
-linked yet; the app uses `UnavailableBackend` and the viewport renders placeholder layers. A
-future FFmpeg-backed implementation plugs in without changes to the core or UI.
+`crates/media` defines the `MediaBackend` trait (probe, export and preview conversion),
+implemented by the FFmpeg command-line backend. The viewport loads media through Tauri's asset
+protocol: the `prepare_preview` command allows exactly one file per request (the original when
+the webview can decode it, otherwise an H.264 MP4 / PNG proxy generated by `make_preview`), so
+the asset scope is empty by default. Imports run off the UI thread.
