@@ -1,4 +1,5 @@
 use crate::demo::demo_project;
+use crate::ops::MAX_RESOLUTION;
 use crate::*;
 
 fn secs(s: i64) -> Ticks {
@@ -160,6 +161,8 @@ fn set_transform_and_validation() {
         x: 10.0,
         y: 20.0,
         scale: 0.5,
+        scale_x: 1.5,
+        scale_y: 0.75,
         rotation: 15.0,
     };
     editor
@@ -477,4 +480,135 @@ fn import_media_and_add_clip() {
     assert!(editor.apply(&EditOp::RenameProject { name: "  ".into() }).is_err());
     editor.undo().unwrap();
     assert!(editor.project().sequences[0].tracks.iter().all(|t| t.clips.is_empty()));
+}
+
+#[test]
+fn add_and_remove_tracks() {
+    let (mut editor, seq_id, [a1, v1, v2]) = setup();
+    let add = |kind, name: Option<&str>| EditOp::AddTrack {
+        sequence_id: seq_id,
+        kind,
+        name: name.map(str::to_owned),
+    };
+    let v3 = editor
+        .apply(&add(TrackKind::Video, None))
+        .unwrap()
+        .created_track_id
+        .unwrap();
+    let a2 = editor
+        .apply(&add(TrackKind::Audio, Some("  ")))
+        .unwrap()
+        .created_track_id
+        .unwrap();
+    let seq = main_seq(&editor);
+    let (v3, a2) = (seq.track(v3).unwrap(), seq.track(a2).unwrap());
+    assert_eq!((v3.name.as_str(), v3.kind, v3.z_index), ("V3", TrackKind::Video, 3));
+    assert_eq!((a2.name.as_str(), a2.kind, a2.z_index), ("A2", TrackKind::Audio, -1));
+    let stack: Vec<&str> = seq.tracks_by_z().iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(stack, ["A2", "A1", "V1", "V2", "V3"]);
+    let named = editor
+        .apply(&add(TrackKind::Video, Some(" Titles ")))
+        .unwrap()
+        .created_track_id
+        .unwrap();
+    assert_eq!(main_seq(&editor).track(named).unwrap().name, "Titles");
+
+    // Removing a track removes its clips; undo brings both back.
+    let before = editor.project().clone();
+    editor
+        .apply(&EditOp::RemoveTrack {
+            sequence_id: seq_id,
+            track_id: v1,
+        })
+        .unwrap();
+    assert!(main_seq(&editor).track(v1).is_none());
+    assert!(
+        main_seq(&editor)
+            .tracks
+            .iter()
+            .all(|t| t.clips.iter().all(|c| c.name != "B-roll"))
+    );
+    editor.undo().unwrap();
+    assert_eq!(editor.project(), &before);
+
+    let missing = TrackId::new();
+    assert_eq!(
+        editor.apply(&EditOp::RemoveTrack {
+            sequence_id: seq_id,
+            track_id: missing,
+        }),
+        Err(EditError::TrackNotFound(missing))
+    );
+    let mut project = editor.project().clone();
+    project.sequence_mut(seq_id).unwrap().track_mut(v2).unwrap().locked = true;
+    let mut editor = Editor::new(project);
+    assert_eq!(
+        editor.apply(&EditOp::RemoveTrack {
+            sequence_id: seq_id,
+            track_id: v2,
+        }),
+        Err(EditError::TrackLocked(v2))
+    );
+    assert!(main_seq(&editor).track(a1).is_some());
+}
+
+#[test]
+fn set_sequence_resolution_validates_size() {
+    let (mut editor, seq_id, _) = setup();
+    let set = |width, height| EditOp::SetSequenceResolution {
+        sequence_id: seq_id,
+        resolution: Resolution { width, height },
+    };
+    editor.apply(&set(1080, 1920)).unwrap();
+    assert_eq!(
+        main_seq(&editor).resolution,
+        Resolution {
+            width: 1080,
+            height: 1920
+        }
+    );
+    let before = editor.project().clone();
+    for (w, h) in [(0, 1080), (1920, 0), (MAX_RESOLUTION + 1, 1080)] {
+        assert_eq!(editor.apply(&set(w, h)), Err(EditError::InvalidResolution));
+    }
+    assert_eq!(editor.project(), &before);
+}
+
+#[test]
+fn transform_stretch_is_validated_and_defaults_for_old_projects() {
+    let (mut editor, seq_id, _) = setup();
+    let logo = clip_named(main_seq(&editor), "Logo").id;
+    for bad in [
+        Transform {
+            scale_x: 0.0,
+            ..Transform::default()
+        },
+        Transform {
+            scale_y: -1.0,
+            ..Transform::default()
+        },
+        Transform {
+            scale_x: f64::INFINITY,
+            ..Transform::default()
+        },
+    ] {
+        assert_eq!(
+            editor.apply(&EditOp::SetClipTransform {
+                sequence_id: seq_id,
+                clip_id: logo,
+                transform: bad,
+            }),
+            Err(EditError::InvalidTransform)
+        );
+    }
+    // Projects saved before per-axis stretch existed keep their proportions.
+    let old: Transform = serde_json::from_str(r#"{"x":1,"y":2,"scale":0.5,"rotation":0}"#).unwrap();
+    assert_eq!((old.scale_x, old.scale_y), (1.0, 1.0));
+    let t = Transform {
+        scale: 2.0,
+        scale_x: 1.5,
+        scale_y: 0.5,
+        ..Transform::default()
+    };
+    assert_eq!((t.width_factor(), t.height_factor()), (3.0, 1.0));
 }

@@ -66,7 +66,7 @@ impl MediaBackend for FfmpegCli {
                 available: true,
                 can_decode: false,
                 can_export: true,
-                detail: format!("{version}; export and media probing enabled, viewport shows placeholders"),
+                detail: format!("{version}; export, media probing and preview conversion enabled"),
             },
             None => BackendStatus {
                 name: "ffmpeg".to_owned(),
@@ -97,6 +97,45 @@ impl MediaBackend for FfmpegCli {
         Err(MediaError::Unsupported(
             "frame decoding for the viewport is not implemented".to_owned(),
         ))
+    }
+
+    fn make_preview(&self, input: &Path, kind: MediaKind, output: &Path) -> Result<(), MediaError> {
+        self.require_available()?;
+        if !input.is_file() {
+            return Err(MediaError::Io(format!("media file not found: {}", input.display())));
+        }
+        // Render next to the target and rename, so a half-written preview is
+        // never picked up (also when two requests race for the same file).
+        let mut partial = output.as_os_str().to_owned();
+        partial.push(format!(
+            ".{}-{:?}.part",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let partial = PathBuf::from(partial);
+        let args = build_preview_args(input, kind, &partial)?;
+        let result = Command::new(&self.ffmpeg)
+            .args(&args)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| MediaError::Io(e.to_string()));
+        let output_ok = match result {
+            Ok(out) if out.status.success() => Ok(()),
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let tail: Vec<&str> = stderr.lines().rev().take(4).collect();
+                Err(MediaError::Decode(
+                    tail.into_iter().rev().collect::<Vec<_>>().join("\n"),
+                ))
+            }
+            Err(e) => Err(e),
+        };
+        let renamed =
+            output_ok.and_then(|()| std::fs::rename(&partial, output).map_err(|e| MediaError::Io(e.to_string())));
+        if renamed.is_err() {
+            let _ = std::fs::remove_file(&partial);
+        }
+        renamed
     }
 
     fn export(
@@ -217,6 +256,55 @@ fn parse_probe(json: &str) -> Result<MediaInfo, MediaError> {
     })
 }
 
+/// Maximum width of generated video previews; keeps conversion fast.
+const PREVIEW_MAX_WIDTH: u32 = 1280;
+
+/// Builds the `ffmpeg` arguments that convert `input` into a web-view friendly
+/// preview at `output` (see [`MediaBackend::make_preview`]).
+pub fn build_preview_args(input: &Path, kind: MediaKind, output: &Path) -> Result<Vec<String>, MediaError> {
+    let mut args: Vec<String> = ["-y", "-hide_banner", "-nostdin", "-v", "error", "-i"]
+        .map(str::to_owned)
+        .into();
+    args.push(input.to_string_lossy().into_owned());
+    match kind {
+        MediaKind::Video => {
+            args.extend(["-map", "0:v:0", "-map", "0:a:0?", "-vf"].map(str::to_owned));
+            // Even dimensions (required by yuv420p), never upscaled.
+            args.push(format!(
+                "scale='trunc(min({PREVIEW_MAX_WIDTH},iw)/2)*2':-2,format=yuv420p"
+            ));
+            args.extend(
+                [
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "26",
+                    // Frequent keyframes keep scrubbing in the viewport responsive.
+                    "-g",
+                    "15",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    "-movflags",
+                    "+faststart",
+                    "-f",
+                    "mp4",
+                ]
+                .map(str::to_owned),
+            );
+        }
+        MediaKind::Image => args.extend(["-frames:v", "1", "-c:v", "png", "-f", "image2"].map(str::to_owned)),
+        MediaKind::Audio => {
+            return Err(MediaError::Unsupported("audio files have no visual preview".to_owned()));
+        }
+    }
+    args.push(output.to_string_lossy().into_owned());
+    Ok(args)
+}
+
 fn secs(ticks: Ticks) -> String {
     format!("{:.6}", ticks.as_seconds_f64())
 }
@@ -306,7 +394,11 @@ pub fn build_export_args(
             }
             let idx = add_input(&mut args, source, clip.source.in_point, clip.duration)?;
             let t = clip.transform;
-            let mut chain = format!("[{idx}:v]format=rgba,scale=iw*{:.6}:ih*{:.6}", t.scale, t.scale);
+            let mut chain = format!(
+                "[{idx}:v]format=rgba,scale=iw*{:.6}:ih*{:.6}",
+                t.width_factor(),
+                t.height_factor()
+            );
             if t.rotation != 0.0 {
                 let rad = t.rotation.to_radians();
                 chain.push_str(&format!(",rotate={rad:.6}:ow=rotw({rad:.6}):oh=roth({rad:.6}):c=none"));
@@ -442,7 +534,9 @@ mod tests {
                 x: 10.0,
                 y: -20.0,
                 scale: 0.5,
+                scale_x: 2.0,
                 rotation: 90.0,
+                ..Transform::default()
             },
             opacity: 0.5,
             color: "#fff".into(),
@@ -471,7 +565,7 @@ mod tests {
         let args = build_export_args(&project, &project.sequences[0], &settings()).unwrap();
         std::fs::remove_file(&file).unwrap();
         let graph = &args[args.iter().position(|a| a == "-filter_complex").unwrap() + 1];
-        assert!(graph.contains("scale=iw*0.500000:ih*0.500000"));
+        assert!(graph.contains("scale=iw*1.000000:ih*0.500000"));
         assert!(graph.contains("rotate=1.570796"));
         assert!(graph.contains("colorchannelmixer=aa=0.5000"));
         assert!(graph.contains("setpts=PTS-STARTPTS+2.000000/TB"));
@@ -524,6 +618,18 @@ mod tests {
         let audio = r#"{"streams":[{"codec_type":"audio","codec_name":"mp3"}],"format":{"duration":"3"}}"#;
         assert_eq!(parse_probe(audio).unwrap().kind, MediaKind::Audio);
         assert!(parse_probe(r#"{"streams":[],"format":{}}"#).is_err());
+    }
+
+    #[test]
+    fn preview_args_target_web_friendly_formats() {
+        let args = build_preview_args(Path::new("in.mkv"), MediaKind::Video, Path::new("out.mp4")).unwrap();
+        assert!(args.windows(2).any(|w| w == ["-c:v", "libx264"]));
+        assert!(args.windows(2).any(|w| w == ["-map", "0:a:0?"]));
+        assert!(args.iter().any(|a| a.contains("min(1280,iw)") && a.contains("yuv420p")));
+        assert_eq!(&args[args.len() - 3..], ["-f", "mp4", "out.mp4"]);
+        let args = build_preview_args(Path::new("in.tiff"), MediaKind::Image, Path::new("out.png")).unwrap();
+        assert!(args.windows(2).any(|w| w == ["-frames:v", "1"]));
+        assert!(build_preview_args(Path::new("in.wav"), MediaKind::Audio, Path::new("o")).is_err());
     }
 
     #[test]
@@ -612,6 +718,7 @@ mod tests {
                 y: -50.0,
                 scale: 2.0,
                 rotation: 30.0,
+                ..Transform::default()
             },
         );
         assert_eq!(project.media[1].width, Some(320));
@@ -641,6 +748,32 @@ mod tests {
         );
         assert!(info.audio_codec.is_some());
         assert!((info.duration.as_seconds_f64() - 3.0).abs() < 0.2);
+
+        // Formats a web view may not play are converted to H.264 MP4 / PNG previews.
+        let mkv = generate(
+            &backend,
+            &dir,
+            "v.mkv",
+            &["-f", "lavfi", "-i", "testsrc=s=321x241:r=25:d=1", "-c:v", "mpeg4"],
+        );
+        let preview = dir.join("preview.mp4");
+        backend.make_preview(&mkv, MediaKind::Video, &preview).unwrap();
+        let info = backend.probe(&preview).unwrap();
+        assert_eq!(info.video_codec.as_deref(), Some("h264"));
+        assert_eq!(info.resolution.map(|r| (r.width, r.height)), Some((320, 240)));
+        let still = dir.join("still.png");
+        backend.make_preview(&image, MediaKind::Image, &still).unwrap();
+        assert_eq!(backend.probe(&still).unwrap().kind, MediaKind::Image);
+        assert!(
+            backend
+                .make_preview(&dir.join("missing.mkv"), MediaKind::Video, &preview)
+                .is_err()
+        );
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().to_string_lossy().ends_with(".part"))
+            .count();
+        assert_eq!(leftovers, 0);
 
         let cancelled = backend.export(&project, project.sequences[0].id, &settings, &mut |_| false);
         assert_eq!(cancelled, Err(MediaError::Cancelled));

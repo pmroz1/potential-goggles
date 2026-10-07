@@ -237,8 +237,19 @@ impl Track {
 pub struct Transform {
     pub x: f64,
     pub y: f64,
+    /// Uniform scale (keeps the source proportions).
     pub scale: f64,
+    /// Horizontal stretch applied on top of `scale` (1.0 = source proportions).
+    #[serde(default = "one")]
+    pub scale_x: f64,
+    /// Vertical stretch applied on top of `scale` (1.0 = source proportions).
+    #[serde(default = "one")]
+    pub scale_y: f64,
     pub rotation: f64,
+}
+
+fn one() -> f64 {
+    1.0
 }
 
 impl Default for Transform {
@@ -247,6 +258,8 @@ impl Default for Transform {
             x: 0.0,
             y: 0.0,
             scale: 1.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
             rotation: 0.0,
         }
     }
@@ -254,7 +267,24 @@ impl Default for Transform {
 
 impl Transform {
     pub fn is_finite(&self) -> bool {
-        self.x.is_finite() && self.y.is_finite() && self.scale.is_finite() && self.rotation.is_finite()
+        [self.x, self.y, self.scale, self.scale_x, self.scale_y, self.rotation]
+            .iter()
+            .all(|v| v.is_finite())
+    }
+
+    /// Finite, with positive scale factors.
+    pub fn is_valid(&self) -> bool {
+        self.is_finite() && self.scale > 0.0 && self.scale_x > 0.0 && self.scale_y > 0.0
+    }
+
+    /// Effective horizontal scale (`scale * scale_x`).
+    pub fn width_factor(&self) -> f64 {
+        self.scale * self.scale_x
+    }
+
+    /// Effective vertical scale (`scale * scale_y`).
+    pub fn height_factor(&self) -> f64 {
+        self.scale * self.scale_y
     }
 }
 

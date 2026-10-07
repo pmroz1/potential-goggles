@@ -8,7 +8,9 @@ use crate::clipboard::ClipboardPayload;
 use crate::error::EditError;
 use crate::ids::SourceId;
 use crate::ids::{ClipId, SequenceId, TrackId};
-use crate::model::{Clip, MediaKind, MediaSource, Project, Resolution, Sequence, SourceRef, TrackKind, Transform};
+use crate::model::{
+    Clip, MediaKind, MediaSource, Project, Resolution, Sequence, SourceRef, Track, TrackKind, Transform,
+};
 use crate::time::{FrameRate, Ticks, TimeRange};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,7 +62,25 @@ pub enum EditOp {
         frame_rate: FrameRate,
         resolution: Resolution,
     },
+    /// Change a sequence's frame size (and therefore its aspect ratio).
+    SetSequenceResolution {
+        sequence_id: SequenceId,
+        resolution: Resolution,
+    },
+    /// Add an empty track. Video tracks go on top of the compositing stack,
+    /// audio tracks below every other track. A missing or blank `name` gets
+    /// the next free `V<n>` / `A<n>` name.
+    AddTrack {
+        sequence_id: SequenceId,
+        kind: TrackKind,
+        name: Option<String>,
+    },
+    /// Remove a track together with all of its clips.
+    RemoveTrack { sequence_id: SequenceId, track_id: TrackId },
 }
+
+/// Largest accepted sequence width or height, in pixels.
+pub const MAX_RESOLUTION: u32 = 16_384;
 
 /// Information about entities created by an operation.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -70,6 +90,7 @@ pub struct EditOutcome {
     pub created_clip_ids: Vec<ClipId>,
     pub created_sequence_id: Option<SequenceId>,
     pub created_source_id: Option<SourceId>,
+    pub created_track_id: Option<TrackId>,
 }
 
 /// Applies `op` to `project`. On error the project may be partially modified,
@@ -91,7 +112,7 @@ pub fn apply(project: &mut Project, op: &EditOp) -> Result<EditOutcome, EditErro
             clip_id,
             transform,
         } => {
-            if !transform.is_finite() || transform.scale <= 0.0 {
+            if !transform.is_valid() {
                 return Err(EditError::InvalidTransform);
             }
             let sequence = sequence_mut(project, *sequence_id)?;
@@ -197,14 +218,73 @@ pub fn apply(project: &mut Project, op: &EditOp) -> Result<EditOutcome, EditErro
             if frame_rate.numerator == 0 || frame_rate.denominator == 0 {
                 return Err(EditError::InvalidFrameRate);
             }
+            validate_resolution(*resolution)?;
             let sequence = Sequence::with_default_tracks(name.clone(), *frame_rate, *resolution);
             outcome.created_sequence_id = Some(sequence.id);
             project.sequences.push(sequence);
+        }
+        EditOp::SetSequenceResolution {
+            sequence_id,
+            resolution,
+        } => {
+            validate_resolution(*resolution)?;
+            sequence_mut(project, *sequence_id)?.resolution = *resolution;
+        }
+        EditOp::AddTrack {
+            sequence_id,
+            kind,
+            name,
+        } => {
+            let sequence = sequence_mut(project, *sequence_id)?;
+            let name = match name.as_deref().map(str::trim) {
+                Some(name) if !name.is_empty() => name.to_owned(),
+                _ => next_track_name(sequence, *kind),
+            };
+            let z_index = match kind {
+                TrackKind::Video => sequence.tracks.iter().map(|t| t.z_index).max().map_or(0, |z| z + 1),
+                TrackKind::Audio => sequence.tracks.iter().map(|t| t.z_index).min().map_or(0, |z| z - 1),
+            };
+            let track = Track::new(name, *kind, z_index);
+            outcome.created_track_id = Some(track.id);
+            sequence.tracks.push(track);
+        }
+        EditOp::RemoveTrack { sequence_id, track_id } => {
+            let sequence = sequence_mut(project, *sequence_id)?;
+            let index = sequence
+                .tracks
+                .iter()
+                .position(|t| t.id == *track_id)
+                .ok_or(EditError::TrackNotFound(*track_id))?;
+            if sequence.tracks[index].locked {
+                return Err(EditError::TrackLocked(*track_id));
+            }
+            sequence.tracks.remove(index);
         }
     }
     project.revision += 1;
     outcome.revision = project.revision;
     Ok(outcome)
+}
+
+fn validate_resolution(resolution: Resolution) -> Result<(), EditError> {
+    let valid = |v: u32| (1..=MAX_RESOLUTION).contains(&v);
+    if valid(resolution.width) && valid(resolution.height) {
+        Ok(())
+    } else {
+        Err(EditError::InvalidResolution)
+    }
+}
+
+/// First unused `V<n>` / `A<n>` name in the sequence.
+fn next_track_name(sequence: &Sequence, kind: TrackKind) -> String {
+    let prefix = match kind {
+        TrackKind::Video => "V",
+        TrackKind::Audio => "A",
+    };
+    (1..)
+        .map(|n| format!("{prefix}{n}"))
+        .find(|name| sequence.tracks.iter().all(|t| &t.name != name))
+        .expect("an unused name exists")
 }
 
 fn sequence_mut(project: &mut Project, id: SequenceId) -> Result<&mut Sequence, EditError> {
@@ -271,7 +351,7 @@ fn paste_clips(
         return Err(EditError::NegativeTime);
     }
     for entry in &payload.entries {
-        if !entry.clip.transform.is_finite() || entry.clip.transform.scale <= 0.0 {
+        if !entry.clip.transform.is_valid() {
             return Err(EditError::InvalidTransform);
         }
         let source_id = entry.clip.source.source_id;

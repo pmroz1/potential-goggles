@@ -57,7 +57,7 @@ pub fn demo_project() -> Project {
         x: 760.0,
         y: -400.0,
         scale: 0.2,
-        rotation: 0.0,
+        ..Transform::default()
     };
     main.tracks[2].clips.push(logo_clip);
 
