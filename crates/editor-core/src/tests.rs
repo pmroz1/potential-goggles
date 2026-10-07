@@ -612,3 +612,103 @@ fn transform_stretch_is_validated_and_defaults_for_old_projects() {
     };
     assert_eq!((t.width_factor(), t.height_factor()), (3.0, 1.0));
 }
+
+#[test]
+fn trim_clip_from_either_end_within_source() {
+    let (mut editor, seq_id, [_, _, v2]) = setup();
+    let clip = clip_named(main_seq(&editor), "Interview B").clone();
+    let trim = |start, in_point, duration| EditOp::TrimClip {
+        sequence_id: seq_id,
+        clip_id: clip.id,
+        start: secs(start),
+        in_point: secs(in_point),
+        duration: secs(duration),
+    };
+
+    // Shorten from the start: the source in point moves with it.
+    editor.apply(&trim(16, 42, 8)).unwrap();
+    let trimmed = clip_named(main_seq(&editor), "Interview B");
+    assert_eq!(
+        (trimmed.start, trimmed.source.in_point, trimmed.duration),
+        (secs(16), secs(42), secs(8))
+    );
+
+    // Lengthen from the end, up to the end of the 120 s source.
+    editor.apply(&trim(16, 42, 78)).unwrap();
+    assert_eq!(editor.apply(&trim(16, 42, 79)), Err(EditError::InvalidDuration));
+    assert_eq!(editor.apply(&trim(16, 42, 0)), Err(EditError::InvalidDuration));
+    assert_eq!(editor.apply(&trim(16, -1, 8)), Err(EditError::NegativeTime));
+    // Extending the start backwards into the B-roll clip is rejected.
+    assert!(matches!(editor.apply(&trim(13, 39, 11)), Err(EditError::Overlap(_))));
+
+    // Still images can be stretched past their nominal duration.
+    let logo = clip_named(main_seq(&editor), "Logo").clone();
+    let stretch = EditOp::TrimClip {
+        sequence_id: seq_id,
+        clip_id: logo.id,
+        start: secs(2),
+        in_point: Ticks::ZERO,
+        duration: secs(7200),
+    };
+    editor.apply(&stretch).unwrap();
+    assert_eq!(clip_named(main_seq(&editor), "Logo").duration, secs(7200));
+
+    let mut project = editor.project().clone();
+    project.sequence_mut(seq_id).unwrap().track_mut(v2).unwrap().locked = true;
+    let mut locked = Editor::new(project);
+    assert_eq!(locked.apply(&stretch), Err(EditError::TrackLocked(v2)));
+
+    editor.undo().unwrap();
+    assert_eq!(clip_named(main_seq(&editor), "Logo").duration, secs(12));
+}
+
+#[test]
+fn split_clips_at_a_time() {
+    let (mut editor, seq_id, [a1, v1, _]) = setup();
+    let interview = clip_named(main_seq(&editor), "Interview A").clone();
+    let music = clip_named(main_seq(&editor), "Music").clone();
+    let outcome = editor
+        .apply(&EditOp::SplitClips {
+            sequence_id: seq_id,
+            clip_ids: vec![interview.id, music.id],
+            at: secs(3),
+        })
+        .unwrap();
+    assert_eq!(outcome.created_clip_ids.len(), 2);
+
+    let seq = main_seq(&editor);
+    let v1_clips = &seq.track(v1).unwrap().clips;
+    assert_eq!(v1_clips.len(), 4);
+    let (left, right) = (&v1_clips[0], &v1_clips[1]);
+    assert_eq!(left.id, interview.id);
+    assert_eq!(
+        (left.start, left.duration, left.source.in_point),
+        (secs(0), secs(3), secs(5))
+    );
+    assert_eq!(right.id, outcome.created_clip_ids[0]);
+    assert_eq!(
+        (right.start, right.duration, right.source.in_point),
+        (secs(3), secs(5), secs(8))
+    );
+    assert_eq!(right.name, interview.name);
+    assert_eq!(right.transform, interview.transform);
+    assert_eq!(seq.track(a1).unwrap().clips.len(), 2);
+    assert_eq!(seq.duration(), secs(24));
+
+    // The split point must be strictly inside every clip.
+    let at_edge = EditOp::SplitClips {
+        sequence_id: seq_id,
+        clip_ids: vec![interview.id],
+        at: secs(3),
+    };
+    assert_eq!(editor.apply(&at_edge), Err(EditError::SplitOutsideClip(interview.id)));
+    let empty = EditOp::SplitClips {
+        sequence_id: seq_id,
+        clip_ids: vec![],
+        at: secs(3),
+    };
+    assert_eq!(editor.apply(&empty), Err(EditError::EmptySelection));
+
+    editor.undo().unwrap();
+    assert_eq!(main_seq(&editor).track(v1).unwrap().clips.len(), 3);
+}

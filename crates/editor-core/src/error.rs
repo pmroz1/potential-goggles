@@ -33,6 +33,8 @@ pub enum EditError {
     InvalidFrameRate,
     #[error("duration must be positive and no longer than the media")]
     InvalidDuration,
+    #[error("clip {0} does not span the split point")]
+    SplitOutsideClip(ClipId),
     #[error("name must not be empty")]
     EmptyName,
     #[error("nothing selected")]
