@@ -138,8 +138,8 @@ export type BackendCall =
   | { method: 'importMedia'; paths: string[] };
 
 /**
- * In-memory backend that records every call. `apply` for `moveClip` and
- * `setClipTransform` updates the fixture so the UI can be observed re-rendering.
+ * In-memory backend that records every call. `apply` for `moveClip`,
+ * `setClipTransform`, `trimClip` and `splitClips` updates the fixture so the UI can be observed re-rendering.
  */
 export class FakeEditorBackend extends EditorBackend {
   readonly calls: BackendCall[] = [];
@@ -173,6 +173,31 @@ export class FakeEditorBackend extends EditorBackend {
       } else {
         clip.transform = op.transform;
       }
+    }
+    let createdClipIds: Id[] = [];
+    if (op.type === 'trimClip') {
+      const sequence = project.sequences.find((q) => q.id === op.sequenceId)!;
+      const { clip } = findClip(sequence, op.clipId)!;
+      clip.start = op.start;
+      clip.source = { ...clip.source, inPoint: op.inPoint };
+      clip.duration = op.duration;
+    }
+    if (op.type === 'splitClips') {
+      const sequence = project.sequences.find((q) => q.id === op.sequenceId)!;
+      createdClipIds = op.clipIds.map((id) => {
+        const { track, clip } = findClip(sequence, id)!;
+        const offset = op.at - clip.start;
+        const right: Clip = {
+          ...structuredClone(clip),
+          id: `${clip.id}-split-${project.revision}`,
+          start: op.at,
+          duration: clip.duration - offset,
+          source: { ...clip.source, inPoint: clip.source.inPoint + offset },
+        };
+        clip.duration = offset;
+        track.clips = [...track.clips, right].sort((a, b) => a.start - b.start);
+        return right.id;
+      });
     }
     if (op.type === 'renameProject') {
       project.name = op.name;
@@ -228,7 +253,7 @@ export class FakeEditorBackend extends EditorBackend {
       snapshot: structuredClone(this.snapshot),
       outcome: {
         revision: project.revision,
-        createdClipIds: [],
+        createdClipIds,
         createdSequenceId: null,
         createdTrackId,
       },

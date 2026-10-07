@@ -64,6 +64,8 @@ export class App implements OnInit {
         return;
       }
       this.store.togglePlayback();
+    } else if (!mod && key === 's') {
+      void this.store.splitAtPlayhead();
     } else if (mod && key === 'e') {
       void this.store.exportSequence();
     } else if (mod && key === 's') {

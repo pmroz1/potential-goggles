@@ -29,6 +29,24 @@ pub enum EditOp {
         clip_id: ClipId,
         transform: Transform,
     },
+    /// Change which part of the source a clip shows and where it sits on the
+    /// timeline (trim from either end). Video and audio clips must stay within
+    /// their source media; still images can be stretched to any length.
+    TrimClip {
+        sequence_id: SequenceId,
+        clip_id: ClipId,
+        start: Ticks,
+        in_point: Ticks,
+        duration: Ticks,
+    },
+    /// Cut each clip at timeline time `at` into two clips. The left part keeps
+    /// the original id; the right parts are reported in `created_clip_ids`.
+    /// Every clip must strictly contain `at`.
+    SplitClips {
+        sequence_id: SequenceId,
+        clip_ids: Vec<ClipId>,
+        at: Ticks,
+    },
     /// Remove clips from a sequence.
     DeleteClips {
         sequence_id: SequenceId,
@@ -124,6 +142,22 @@ pub fn apply(project: &mut Project, op: &EditOp) -> Result<EditOutcome, EditErro
                 return Err(EditError::TrackLocked(track.id));
             }
             track.clips[ci].transform = *transform;
+        }
+        EditOp::TrimClip {
+            sequence_id,
+            clip_id,
+            start,
+            in_point,
+            duration,
+        } => {
+            trim_clip(project, *sequence_id, *clip_id, *start, *in_point, *duration)?;
+        }
+        EditOp::SplitClips {
+            sequence_id,
+            clip_ids,
+            at,
+        } => {
+            outcome.created_clip_ids = split_clips(sequence_mut(project, *sequence_id)?, clip_ids, *at)?;
         }
         EditOp::DeleteClips { sequence_id, clip_ids } => {
             let sequence = sequence_mut(project, *sequence_id)?;
@@ -313,6 +347,80 @@ fn move_clip(sequence: &mut Sequence, clip_id: ClipId, track_id: TrackId, start:
         .expect("target track checked above")
         .insert_sorted(clip);
     Ok(())
+}
+
+fn trim_clip(
+    project: &mut Project,
+    sequence_id: SequenceId,
+    clip_id: ClipId,
+    start: Ticks,
+    in_point: Ticks,
+    duration: Ticks,
+) -> Result<(), EditError> {
+    if start.is_negative() || in_point.is_negative() {
+        return Err(EditError::NegativeTime);
+    }
+    if duration <= Ticks::ZERO {
+        return Err(EditError::InvalidDuration);
+    }
+    let sequence = project
+        .sequences
+        .iter_mut()
+        .find(|s| s.id == sequence_id)
+        .ok_or(EditError::SequenceNotFound(sequence_id))?;
+    let (ti, ci) = sequence.locate_clip(clip_id).ok_or(EditError::ClipNotFound(clip_id))?;
+    let track = &mut sequence.tracks[ti];
+    let source_id = track.clips[ci].source.source_id;
+    let source = project
+        .media
+        .iter()
+        .find(|m| m.id == source_id)
+        .ok_or(EditError::SourceNotFound(source_id))?;
+    if source.kind != MediaKind::Image && in_point + duration > source.duration {
+        return Err(EditError::InvalidDuration);
+    }
+    check_placement(track, track.kind, TimeRange::new(start, duration), Some(clip_id))?;
+    let mut clip = track.clips.remove(ci);
+    clip.start = start;
+    clip.source.in_point = in_point;
+    clip.duration = duration;
+    track.insert_sorted(clip);
+    Ok(())
+}
+
+fn split_clips(sequence: &mut Sequence, clip_ids: &[ClipId], at: Ticks) -> Result<Vec<ClipId>, EditError> {
+    if clip_ids.is_empty() {
+        return Err(EditError::EmptySelection);
+    }
+    let mut created = Vec::with_capacity(clip_ids.len());
+    for clip_id in clip_ids {
+        let (ti, ci) = sequence
+            .locate_clip(*clip_id)
+            .ok_or(EditError::ClipNotFound(*clip_id))?;
+        let track = &mut sequence.tracks[ti];
+        if track.locked {
+            return Err(EditError::TrackLocked(track.id));
+        }
+        let left = &mut track.clips[ci];
+        if at <= left.start || at >= left.range().end() {
+            return Err(EditError::SplitOutsideClip(*clip_id));
+        }
+        let offset = at - left.start;
+        let right = Clip {
+            id: ClipId::new(),
+            start: at,
+            duration: left.duration - offset,
+            source: SourceRef {
+                in_point: left.source.in_point + offset,
+                ..left.source
+            },
+            ..left.clone()
+        };
+        left.duration = offset;
+        created.push(right.id);
+        track.insert_sorted(right);
+    }
+    Ok(created)
 }
 
 fn check_placement(

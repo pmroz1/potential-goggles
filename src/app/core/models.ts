@@ -123,6 +123,15 @@ export interface EditResponse {
 export type EditOp =
   | { type: 'moveClip'; sequenceId: Id; clipId: Id; trackId: Id; start: Ticks }
   | { type: 'setClipTransform'; sequenceId: Id; clipId: Id; transform: Transform }
+  | {
+      type: 'trimClip';
+      sequenceId: Id;
+      clipId: Id;
+      start: Ticks;
+      inPoint: Ticks;
+      duration: Ticks;
+    }
+  | { type: 'splitClips'; sequenceId: Id; clipIds: Id[]; at: Ticks }
   | { type: 'deleteClips'; sequenceId: Id; clipIds: Id[] }
   | { type: 'importMedia'; source: MediaSource }
   | {

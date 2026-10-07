@@ -107,7 +107,7 @@ for its backend, so use `npm run tauri dev` for development.
 ### Edit operations
 
 All project mutations are serializable `EditOp`s (`moveClip`, `setClipTransform`,
-`deleteClips`, `pasteClips`, `addSequence`, `addTrack`, `removeTrack`,
+`trimClip`, `splitClips`, `deleteClips`, `pasteClips`, `addSequence`, `addTrack`, `removeTrack`,
 `setSequenceResolution`, …) applied atomically by `Editor`: an operation
 either fully succeeds and becomes one undo step, or is rejected and leaves the project untouched.
 
@@ -121,6 +121,17 @@ Dragging clips on the timeline or layers in the viewport is handled entirely in 
 - **no IPC happens during the drag** — on release a single `moveClip` / `setClipTransform`
   operation (resize handles work the same way, previewing with a CSS `scale`) is committed to the Rust core, which validates it and returns the new snapshot.
 
+### Trimming and splitting
+
+- Drag the left or right edge of a timeline clip to change when it starts or ends. Trimming
+  the start also moves the clip's source in point, so the remaining frames stay in place.
+  Video and audio clips can't grow past their source media; **still images can be stretched
+  to any length** (e.g. to cover a whole video). Edges snap to frames, other clip edges and
+  the playhead, and stop at neighbouring clips. One `trimClip` is committed on release.
+- **Split** (`S`) cuts the selected clips at the playhead into two clips — or every clip under
+  the playhead (on unlocked tracks) when nothing is selected. It is one undoable `splitClips`
+  operation.
+
 ### Clipboard
 
 Copy (`Ctrl/Cmd+C`) builds a structured `ClipboardPayload`
@@ -132,7 +143,7 @@ is selected (click a track header/lane) — relative to that track. Paste is a s
 operation.
 
 Other shortcuts: `Ctrl/Cmd+Z` undo, `Ctrl/Cmd+Shift+Z` / `Ctrl/Cmd+Y` redo, `Delete` removes
-selected clips. Click/drag the ruler to move the playhead.
+selected clips, `S` splits at the playhead. Click/drag the ruler to move the playhead.
 
 ### Media / FFmpeg
 

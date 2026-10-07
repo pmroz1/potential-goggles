@@ -211,3 +211,32 @@
   pointer-events: none;
   z-index: 20;
 }
+
+.trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.trim-handle.start {
+  left: 0;
+}
+
+.trim-handle.end {
+  right: 0;
+}
+
+.clip:hover .trim-handle,
+.clip.selected .trim-handle,
+.clip.trimming .trim-handle {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.clip.trimming {
+  z-index: 10;
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+}

@@ -118,6 +118,14 @@
     </button>
     <button
       type="button"
+      title="Split the selected clips (or all clips) at the playhead (S)"
+      [disabled]="store.sequenceEnd() === 0"
+      (click)="store.splitAtPlayhead()"
+    >
+      Split
+    </button>
+    <button
+      type="button"
       title="Delete"
       [disabled]="store.selection().size === 0"
       (click)="store.deleteSelection()"

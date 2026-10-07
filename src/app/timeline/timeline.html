@@ -96,6 +96,22 @@
               >
                 <span class="clip-name">{{ clip.name }}</span>
                 <span class="clip-meta">in {{ timecode(clip.source.inPoint) }}</span>
+                @if (!track.locked) {
+                  <span
+                    class="trim-handle start"
+                    title="Drag to trim the start"
+                    (pointerdown)="onTrimPointerDown($event, track, clip, 'start')"
+                  ></span>
+                  <span
+                    class="trim-handle end"
+                    [title]="
+                      isImage(clip)
+                        ? 'Drag to change how long the image is shown'
+                        : 'Drag to trim the end'
+                    "
+                    (pointerdown)="onTrimPointerDown($event, track, clip, 'end')"
+                  ></span>
+                }
               </div>
             }
           </div>
