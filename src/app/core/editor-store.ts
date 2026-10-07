@@ -525,6 +525,45 @@ export class EditorStore {
     return this.commit({ type: 'moveClip', sequenceId, clipId, trackId, start });
   }
 
+  /** Commits a completed trim (edge drag) as a single `trimClip` operation. */
+  trimClip(clipId: Id, start: Ticks, inPoint: Ticks, duration: Ticks): Promise<boolean> {
+    const sequenceId = this.activeSequence()?.id;
+    if (!sequenceId) {
+      return Promise.resolve(false);
+    }
+    return this.commit({ type: 'trimClip', sequenceId, clipId, start, inPoint, duration });
+  }
+
+  /**
+   * Cuts clips in two at the playhead: the selected clips under the playhead,
+   * or every clip under the playhead on unlocked tracks when nothing is selected.
+   */
+  async splitAtPlayhead(): Promise<void> {
+    const sequence = this.activeSequence();
+    if (!sequence) {
+      return;
+    }
+    const at = this.playhead();
+    const selection = this.selection();
+    const clipIds = sequence.tracks
+      .filter((t) => !t.locked)
+      .flatMap((t) => t.clips)
+      .filter((c) => selection.size === 0 || selection.has(c.id))
+      .filter((c) => c.start < at && at < c.start + c.duration)
+      .map((c) => c.id);
+    if (clipIds.length === 0) {
+      this.status.set(
+        selection.size > 0
+          ? 'The playhead is not inside a selected clip'
+          : 'No clip under the playhead to split',
+      );
+      return;
+    }
+    if (await this.commit({ type: 'splitClips', sequenceId: sequence.id, clipIds, at })) {
+      this.status.set(`Split ${plural(clipIds.length, 'clip')}`);
+    }
+  }
+
   /** Commits a completed viewport drag as a single `setClipTransform` operation. */
   setClipTransform(clipId: Id, transform: Transform): Promise<boolean> {
     const sequenceId = this.activeSequence()?.id;

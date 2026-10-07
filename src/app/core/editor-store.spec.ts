@@ -39,6 +39,53 @@ describe('EditorStore', () => {
     expect(store.project()?.revision).toBe(1);
   });
 
+  it('commits a trim as a single edit operation', async () => {
+    expect(await store.trimClip('logo', secondsToTicks(2), 0, secondsToTicks(20))).toBe(true);
+    expect(backend.calls).toEqual([
+      {
+        method: 'apply',
+        op: {
+          type: 'trimClip',
+          sequenceId: 'seq-main',
+          clipId: 'logo',
+          start: secondsToTicks(2),
+          inPoint: 0,
+          duration: secondsToTicks(20),
+        },
+      },
+    ]);
+  });
+
+  it('splits the selected clips, or all clips, under the playhead', async () => {
+    store.setPlayhead(secondsToTicks(4));
+    store.selectClip('clip-a', false);
+    await store.splitAtPlayhead();
+    expect(backend.calls.at(-1)).toEqual({
+      method: 'apply',
+      op: {
+        type: 'splitClips',
+        sequenceId: 'seq-main',
+        clipIds: ['clip-a'],
+        at: secondsToTicks(4),
+      },
+    });
+    expect(store.status()).toBe('Split 1 clip');
+
+    store.clearSelection();
+    store.setPlayhead(secondsToTicks(10));
+    await store.splitAtPlayhead();
+    expect(backend.calls.at(-1)).toMatchObject({
+      op: { type: 'splitClips', clipIds: ['clip-b', 'logo'], at: secondsToTicks(10) },
+    });
+
+    // Clip edges are not inside a clip: nothing to split.
+    const count = backend.calls.length;
+    store.setPlayhead(secondsToTicks(30));
+    await store.splitAtPlayhead();
+    expect(backend.calls.length).toBe(count);
+    expect(store.status()).toBe('No clip under the playhead to split');
+  });
+
   it('copies the selection and pastes at the playhead onto the target track', async () => {
     store.selectClip('logo', false);
     store.selectClip('clip-b', true);

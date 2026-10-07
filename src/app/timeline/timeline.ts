@@ -14,7 +14,7 @@ import { EditorStore } from '../core/editor-store';
 import { Clip, Track, tracksByZ } from '../core/models';
 import { startPointerDrag } from '../core/pointer-drag';
 import { formatTimecode, snapToFrame, TICKS_PER_SECOND } from '../core/time';
-import { computeClipDrag, LANE_HEIGHT } from './timeline-geometry';
+import { computeClipDrag, computeClipTrim, LANE_HEIGHT, TrimEdge } from './timeline-geometry';
 
 @Component({
   selector: 'app-timeline',
@@ -72,6 +72,10 @@ export class Timeline implements OnDestroy {
 
   protected clipWidth(clip: Clip): number {
     return Math.max(2, clip.duration * this.store.pixelsPerTick());
+  }
+
+  protected isImage(clip: Clip): boolean {
+    return this.store.media().find((m) => m.id === clip.source.sourceId)?.kind === 'image';
   }
 
   protected timecode(ticks: number): string {
@@ -161,6 +165,69 @@ export class Timeline implements OnDestroy {
           }
         }
         element.style.translate = '';
+      },
+    });
+  }
+
+  /** Drags a clip edge: trims (or, for images, stretches) the clip and commits one `trimClip`. */
+  protected onTrimPointerDown(event: PointerEvent, track: Track, clip: Clip, edge: TrimEdge): void {
+    if (event.button !== 0) {
+      return;
+    }
+    event.stopPropagation();
+    this.store.selectClip(clip.id, false);
+    this.store.setTargetTrack(track.id);
+    const sequence = this.store.activeSequence();
+    if (track.locked || !sequence) {
+      return;
+    }
+
+    const handle = event.currentTarget as HTMLElement;
+    const element = handle.closest<HTMLElement>('.clip');
+    if (!element) {
+      return;
+    }
+    const source = this.store.media().find((m) => m.id === clip.source.sourceId);
+    const snapPoints = sequence.tracks
+      .flatMap((t) => t.clips)
+      .filter((c) => c.id !== clip.id)
+      .flatMap((c) => [c.start, c.start + c.duration]);
+    snapPoints.push(this.store.playhead());
+    const ctx = {
+      clip,
+      edge,
+      originClientX: event.clientX,
+      pixelsPerTick: this.store.pixelsPerTick(),
+      frameRate: sequence.frameRate,
+      sourceDuration: !source || source.kind === 'image' ? null : source.duration,
+      neighbours: track.clips.filter((c) => c.id !== clip.id),
+      snapPoints,
+    };
+    const { left, width } = element.style;
+    const restore = () => {
+      element.classList.remove('trimming');
+      element.style.left = left;
+      element.style.width = width;
+    };
+
+    this.cancelDrag?.();
+    this.cancelDrag = startPointerDrag(event, handle, {
+      onFrame: (x) => {
+        const result = computeClipTrim(ctx, x);
+        element.classList.add('trimming');
+        element.style.left = `${result.left}px`;
+        element.style.width = `${result.width}px`;
+      },
+      onEnd: async (x, _y, cancelled) => {
+        const result = computeClipTrim(ctx, x);
+        if (
+          cancelled ||
+          !result.changed ||
+          !(await this.store.trimClip(clip.id, result.start, result.inPoint, result.duration))
+        ) {
+          restore();
+        }
+        element.classList.remove('trimming');
       },
     });
   }

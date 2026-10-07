@@ -90,6 +90,56 @@ describe('App', () => {
     expect(moved.style.translate).toBe('');
   });
 
+  it('trims a clip edge locally and commits exactly one trim on release', async () => {
+    const { fixture, el } = await render();
+    const clip = el.querySelector<HTMLElement>('[data-clip-id="logo"]')!;
+    const handle = clip.querySelector<HTMLElement>('.trim-handle.end')!;
+    handle.dispatchEvent(pointer('pointerdown', 1120, 10));
+    handle.dispatchEvent(pointer('pointermove', 1280, 10));
+    frames.splice(0).forEach((frame) => frame(0));
+    // The image is stretched visually; nothing is committed during the drag.
+    expect(clip.style.width).toBe('1120px');
+    expect(clip.classList.contains('trimming')).toBe(true);
+    expect(backend.calls).toEqual([]);
+
+    handle.dispatchEvent(pointer('pointerup', 1440, 10));
+    await fixture.whenStable();
+    // +320 px at 80 px/s stretches the 12 s logo to 16 s.
+    expect(backend.calls).toEqual([
+      {
+        method: 'apply',
+        op: {
+          type: 'trimClip',
+          sequenceId: 'seq-main',
+          clipId: 'logo',
+          start: secondsToTicks(2),
+          inPoint: 0,
+          duration: secondsToTicks(16),
+        },
+      },
+    ]);
+    expect(el.querySelector<HTMLElement>('[data-clip-id="logo"]')!.style.width).toBe('1280px');
+  });
+
+  it('splits clips at the playhead with the S key', async () => {
+    const { fixture, el } = await render();
+    fixture.componentInstance['store'].setPlayhead(secondsToTicks(4));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }));
+    await fixture.whenStable();
+    expect(backend.calls).toEqual([
+      {
+        method: 'apply',
+        op: {
+          type: 'splitClips',
+          sequenceId: 'seq-main',
+          clipIds: ['clip-a', 'logo'],
+          at: secondsToTicks(4),
+        },
+      },
+    ]);
+    expect(el.querySelectorAll('.clip').length).toBe(5);
+  });
+
   it('copies and pastes the selection via keyboard shortcuts', async () => {
     const { fixture, el } = await render();
     el.querySelector<HTMLElement>('[data-clip-id="logo"]')!.dispatchEvent(
