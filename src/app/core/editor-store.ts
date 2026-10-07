@@ -1,4 +1,12 @@
-import { computed, inject, Injectable, PendingTasks, signal } from '@angular/core';
+import {
+  computed,
+  effect,
+  inject,
+  Injectable,
+  PendingTasks,
+  signal,
+  untracked,
+} from '@angular/core';
 
 import { EditorBackend } from './editor-backend';
 import {
@@ -8,13 +16,38 @@ import {
   Id,
   MediaBackendStatus,
   MediaSource,
+  Resolution,
   Sequence,
   Ticks,
+  TrackKind,
   Transform,
   findClip,
   sequenceDuration,
 } from './models';
 import { TICKS_PER_SECOND } from './time';
+import { FitMode, fitTransform, sourceSize, withSize } from './transform';
+
+/** Viewport preview of a video or image source. */
+export type PreviewState =
+  | { status: 'loading'; converting: boolean }
+  | { status: 'ready'; url: string; converted: boolean }
+  | { status: 'error'; message: string };
+
+/** A long-running backend task, shown with a loading indicator. */
+export interface Activity {
+  id: number;
+  label: string;
+}
+
+let nextActivityId = 0;
+
+function errorMessage(err: unknown): string {
+  return typeof err === 'string' ? err : err instanceof Error ? err.message : String(err);
+}
+
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? '' : 's'}`;
+}
 
 /**
  * UI-side editor state. Holds the latest snapshot received from the Rust core
@@ -60,6 +93,18 @@ export class EditorStore {
   /** True while a file is being dragged over the window. */
   readonly dropActive = signal(false);
 
+  /** Backend tasks in flight that the user is waiting for. */
+  readonly activities = signal<readonly Activity[]>([]);
+  /** Label of the most recent task in flight, or `null` when idle. */
+  readonly activity = computed(() => this.activities().at(-1)?.label ?? null);
+  /** Files being imported right now (shown as placeholders in the media bin). */
+  readonly importing = signal<readonly Activity[]>([]);
+  /** Viewport previews by source id. */
+  readonly previews = signal<ReadonlyMap<Id, PreviewState>>(new Map());
+  readonly previewsLoading = computed(
+    () => [...this.previews().values()].filter((p) => p.status === 'loading').length,
+  );
+
   readonly playing = signal(false);
   /** Export progress in 0..1, or `null` when no export is running. */
   readonly exportProgress = signal<number | null>(null);
@@ -71,6 +116,60 @@ export class EditorStore {
     () => (this.mediaStatus()?.canExport ?? false) && this.sequenceEnd() > 0,
   );
   private playbackFrame: number | null = null;
+
+  constructor() {
+    // Prepare previews for every visual source used by the active sequence,
+    // so conversions start as soon as a clip is placed on the timeline.
+    effect(() => {
+      const sequence = this.activeSequence();
+      const media = this.media();
+      if (!sequence) {
+        return;
+      }
+      const used = new Set(sequence.tracks.flatMap((t) => t.clips.map((c) => c.source.sourceId)));
+      untracked(() => media.filter((m) => used.has(m.id)).forEach((m) => this.ensurePreview(m)));
+    });
+  }
+
+  /** Starts loading the viewport preview for `source` unless already known. */
+  ensurePreview(source: MediaSource): void {
+    if (source.kind !== 'audio' && !this.previews().has(source.id)) {
+      void this.loadPreview(source.id, false);
+    }
+  }
+
+  /**
+   * Called when the viewport cannot decode a preview: retries once with an
+   * FFmpeg conversion, then reports the source as unplayable.
+   */
+  previewFailed(sourceId: Id): void {
+    const current = this.previews().get(sourceId);
+    if (current?.status !== 'ready') {
+      return;
+    }
+    if (!current.converted) {
+      void this.loadPreview(sourceId, true);
+    } else {
+      this.setPreview(sourceId, { status: 'error', message: 'This file cannot be previewed' });
+    }
+  }
+
+  private async loadPreview(sourceId: Id, convert: boolean): Promise<void> {
+    this.setPreview(sourceId, { status: 'loading', converting: convert });
+    const done = this.pendingTasks.add();
+    try {
+      const url = await this.backend.previewUrl(sourceId, convert);
+      this.setPreview(sourceId, { status: 'ready', url, converted: convert });
+    } catch (err) {
+      this.setPreview(sourceId, { status: 'error', message: errorMessage(err) });
+    } finally {
+      done();
+    }
+  }
+
+  private setPreview(sourceId: Id, state: PreviewState): void {
+    this.previews.update((map) => new Map(map).set(sourceId, state));
+  }
 
   /** Starts advancing the playhead in real time; restarts from 0 at the end. */
   play(): void {
@@ -164,7 +263,7 @@ export class EditorStore {
         this.resetView(snapshot);
         this.status.set(`Opened ${snapshot.project.name}`);
       }
-    });
+    }, 'Opening project…');
   }
 
   async saveProject(saveAs = false): Promise<void> {
@@ -176,19 +275,42 @@ export class EditorStore {
         this.setSnapshot(snapshot);
         this.status.set(`Saved to ${snapshot.path}`);
       }
-    });
+    }, 'Saving project…');
   }
 
+  /** Imports `paths`, or files chosen in a dialog when omitted. */
   async importMedia(paths?: string[]): Promise<void> {
-    const before = this.media().length;
-    await this.run(async () => {
-      const snapshot = await this.backend.importMedia(paths);
-      if (snapshot) {
-        this.setSnapshot(snapshot);
-        const count = snapshot.project.media.length - before;
-        this.status.set(`Imported ${count} file${count === 1 ? '' : 's'}`);
-      }
-    });
+    let files = paths ?? null;
+    if (!files && !(await this.run(async () => (files = await this.backend.chooseMediaFiles())))) {
+      return;
+    }
+    if (!files || files.length === 0) {
+      return;
+    }
+    const chosen: string[] = files;
+    const placeholders = chosen.map((path) => ({
+      id: ++nextActivityId,
+      label: path.split(/[\\/]/).pop() || path,
+    }));
+    this.importing.update((current) => [...current, ...placeholders]);
+    try {
+      await this.run(
+        async () => {
+          const before = new Set(this.media().map((m) => m.id));
+          const snapshot = await this.backend.importMedia(chosen);
+          this.setSnapshot(snapshot);
+          const count = snapshot.project.media.filter((m) => !before.has(m.id)).length;
+          const skipped = chosen.length - count;
+          this.status.set(
+            `Imported ${plural(count, 'file')}` +
+              (skipped > 0 ? ` (${skipped} unsupported skipped)` : ''),
+          );
+        },
+        `Importing ${chosen.length === 1 ? placeholders[0].label : plural(chosen.length, 'file')}…`,
+      );
+    } finally {
+      this.importing.update((current) => current.filter((item) => !placeholders.includes(item)));
+    }
   }
 
   async renameProject(name: string): Promise<void> {
@@ -223,21 +345,114 @@ export class EditorStore {
     const start = occupied
       ? track.clips.reduce((latest, c) => Math.max(latest, c.start + c.duration), 0)
       : playhead;
-    const ok = await this.commit({
-      type: 'addClip',
-      sequenceId: sequence.id,
-      trackId: track.id,
-      sourceId: source.id,
-      start,
-      duration: null,
-    });
+    const ok = await this.commit(
+      {
+        type: 'addClip',
+        sequenceId: sequence.id,
+        trackId: track.id,
+        sourceId: source.id,
+        start,
+        duration: null,
+      },
+      `Adding ${source.name} to ${track.name}…`,
+    );
     if (ok) {
       this.status.set(`Added ${source.name} to ${track.name}`);
     }
   }
 
+  /** Adds an empty video (top of the stack) or audio (bottom) track. */
+  async addTrack(kind: TrackKind): Promise<void> {
+    const sequenceId = this.activeSequence()?.id;
+    if (!sequenceId) {
+      return;
+    }
+    await this.run(async () => {
+      const response = await this.backend.apply({ type: 'addTrack', sequenceId, kind, name: null });
+      this.applyResponse(response);
+      const id = response.outcome.createdTrackId;
+      const track = this.activeSequence()?.tracks.find((t) => t.id === id);
+      if (track) {
+        this.targetTrackId.set(track.id);
+        this.status.set(`Added track ${track.name}`);
+      }
+    }, `Adding ${kind} track…`);
+  }
+
+  /** Removes a track and its clips (undoable). */
+  async removeTrack(trackId: Id): Promise<void> {
+    const sequence = this.activeSequence();
+    const track = sequence?.tracks.find((t) => t.id === trackId);
+    if (!sequence || !track) {
+      return;
+    }
+    const ok = await this.commit(
+      { type: 'removeTrack', sequenceId: sequence.id, trackId },
+      `Removing track ${track.name}…`,
+    );
+    if (ok) {
+      if (this.targetTrackId() === trackId) {
+        this.targetTrackId.set(null);
+      }
+      const clips = track.clips.length;
+      this.status.set(
+        `Removed track ${track.name}` +
+          (clips > 0 ? ` and ${plural(clips, 'clip')} (Undo restores them)` : ''),
+      );
+    }
+  }
+
+  /** Changes the active sequence's frame size (aspect ratio). */
+  async setSequenceResolution(resolution: Resolution): Promise<void> {
+    const sequence = this.activeSequence();
+    const { width, height } = resolution;
+    if (
+      !sequence ||
+      (sequence.resolution.width === width && sequence.resolution.height === height)
+    ) {
+      return;
+    }
+    if (await this.commit({ type: 'setSequenceResolution', sequenceId: sequence.id, resolution })) {
+      this.status.set(`${sequence.name} is now ${width}×${height}`);
+    }
+  }
+
+  /** Fits, fills or stretches a clip to the frame, or restores its proportions. */
+  fitClip(clipId: Id, mode: FitMode): Promise<boolean> {
+    const found = this.clipContext(clipId);
+    if (!found) {
+      return Promise.resolve(false);
+    }
+    const { transform, source, frame } = found;
+    return this.setClipTransform(clipId, fitTransform(mode, transform, source, frame));
+  }
+
+  /** Resizes a clip to `width` × `height` sequence pixels (may change its proportions). */
+  setClipSize(clipId: Id, width: number, height: number): Promise<boolean> {
+    const found = this.clipContext(clipId);
+    if (!found || !(width > 0) || !(height > 0)) {
+      return Promise.resolve(false);
+    }
+    return this.setClipTransform(clipId, withSize(found.transform, found.source, width, height));
+  }
+
+  private clipContext(clipId: Id) {
+    const sequence = this.activeSequence();
+    const clip = sequence && findClip(sequence, clipId)?.clip;
+    if (!sequence || !clip) {
+      return null;
+    }
+    const source = this.media().find((m) => m.id === clip.source.sourceId);
+    return {
+      transform: clip.transform,
+      source: sourceSize(source, sequence.resolution),
+      frame: sequence.resolution,
+    };
+  }
+
   private resetView(snapshot: EditorSnapshot): void {
     this.pause();
+    this.clearFailedPreviews();
     this.selectedSequenceId.set(null);
     this.selection.set(new Set());
     this.targetTrackId.set(null);
@@ -245,7 +460,15 @@ export class EditorStore {
     this.setSnapshot(snapshot);
   }
 
+  /** Forgets previews that failed so they are retried (e.g. after installing FFmpeg). */
+  private clearFailedPreviews(): void {
+    this.previews.update(
+      (map) => new Map([...map].filter(([, preview]) => preview.status !== 'error')),
+    );
+  }
+
   async load(): Promise<void> {
+    this.clearFailedPreviews();
     await this.run(async () => {
       this.setSnapshot(await this.backend.getState());
       this.mediaStatus.set(await this.backend.mediaStatus());
@@ -391,8 +614,8 @@ export class EditorStore {
     await this.run(async () => this.setSnapshot(await this.backend.redo()));
   }
 
-  private async commit(op: EditOp): Promise<boolean> {
-    return this.run(async () => this.applyResponse(await this.backend.apply(op)));
+  private async commit(op: EditOp, label?: string): Promise<boolean> {
+    return this.run(async () => this.applyResponse(await this.backend.apply(op)), label);
   }
 
   private applyResponse(response: EditResponse): void {
@@ -409,19 +632,25 @@ export class EditorStore {
     }
   }
 
-  private async run(action: () => Promise<void>): Promise<boolean> {
+  /** Runs a backend call; a `label` shows a loading indicator while it runs. */
+  private async run(action: () => Promise<unknown>, label?: string): Promise<boolean> {
     // Keep the app "unstable" while a backend call is in flight.
     const done = this.pendingTasks.add();
+    const activity = label ? { id: ++nextActivityId, label } : null;
+    if (activity) {
+      this.activities.update((current) => [...current, activity]);
+    }
     try {
       await action();
       this.error.set(null);
       return true;
     } catch (err) {
-      this.error.set(
-        typeof err === 'string' ? err : err instanceof Error ? err.message : String(err),
-      );
+      this.error.set(errorMessage(err));
       return false;
     } finally {
+      if (activity) {
+        this.activities.update((current) => current.filter((a) => a !== activity));
+      }
       done();
     }
   }

@@ -1,50 +1,122 @@
 <div #container class="viewport">
   @if (store.activeSequence(); as sequence) {
     <div
-      class="stage"
+      class="frame"
+      [class.dragging]="dragging()"
       [style.width.px]="stage().width"
       [style.height.px]="stage().height"
-      (pointerdown)="store.clearSelection()"
     >
-      @for (layer of layers(); track layer.clip.id) {
-        @let box = layerBox(layer);
-        <div
-          class="layer"
-          role="button"
-          tabindex="0"
-          [attr.aria-label]="layer.clip.name"
-          [attr.data-clip-id]="layer.clip.id"
-          [class.selected]="store.selection().has(layer.clip.id)"
-          [style.left.px]="box.left"
-          [style.top.px]="box.top"
-          [style.width.px]="box.width"
-          [style.height.px]="box.height"
-          [style.rotate.deg]="layer.clip.transform.rotation"
-          [style.opacity]="layer.clip.opacity"
-          [style.z-index]="$index + 1"
-          [style.mix-blend-mode]="blendMode(layer.track.blendMode)"
-          [style.--clip-color]="layer.clip.color"
-          (pointerdown)="onLayerPointerDown($event, layer)"
-          (keydown)="onLayerKeyDown($event, layer)"
-        >
-          <span class="layer-name">{{ layer.clip.name }}</span>
-          <span class="layer-meta">
-            {{ layer.track.name }} · {{ layer.source?.name ?? 'missing source' }} &#64;
-            {{ timecode(layer.sourceTime) }}
-          </span>
-        </div>
-      } @empty {
-        <div class="empty">
-          @if (store.media().length === 0) {
-            <strong>Start by importing media</strong>
-            <span>Use Import Media or drop files into the window.</span>
-          } @else if (!hasClips()) {
-            <strong>Add a clip to the timeline</strong>
-            <span>Press “+ Add” next to a media item.</span>
-          } @else {
-            No video at playhead
-          }
-        </div>
+      <div class="stage" (pointerdown)="store.clearSelection()">
+        @for (layer of layers(); track layer.clip.id) {
+          @let box = layerBox(layer);
+          @let state = previewState(layer);
+          @let url = previewUrl(layer);
+          <div
+            class="layer"
+            role="button"
+            tabindex="0"
+            [attr.aria-label]="layer.clip.name"
+            [attr.data-clip-id]="layer.clip.id"
+            [class.selected]="store.selection().has(layer.clip.id)"
+            [class.has-media]="url !== null"
+            [style.left.px]="box.left"
+            [style.top.px]="box.top"
+            [style.width.px]="box.width"
+            [style.height.px]="box.height"
+            [style.rotate.deg]="layer.clip.transform.rotation"
+            [style.opacity]="layer.clip.opacity"
+            [style.z-index]="$index + 1"
+            [style.mix-blend-mode]="blendMode(layer.track.blendMode)"
+            [style.--clip-color]="layer.clip.color"
+            (pointerdown)="onLayerPointerDown($event, layer)"
+            (keydown)="onLayerKeyDown($event, layer)"
+          >
+            @if (url !== null) {
+              @if (layer.source?.kind === 'image') {
+                <img
+                  class="media"
+                  alt=""
+                  draggable="false"
+                  [src]="url"
+                  (error)="onPreviewFailed(layer)"
+                />
+              } @else {
+                <video
+                  #video="previewVideo"
+                  class="media"
+                  appPreviewVideo
+                  [src]="url"
+                  [time]="sourceSeconds(layer)"
+                  [playing]="store.playing()"
+                  (failed)="onPreviewFailed(layer)"
+                ></video>
+                @if (video.loading()) {
+                  <span class="layer-status overlay" role="status">
+                    <span class="spinner" aria-hidden="true"></span>
+                    Loading video…
+                  </span>
+                }
+              }
+            }
+            <span class="layer-label">
+              <span class="layer-name">{{ layer.clip.name }}</span>
+              <span class="layer-meta">
+                {{ layer.track.name }} · {{ layer.source?.name ?? 'missing source' }} &#64;
+                {{ timecode(layer.sourceTime) }}
+              </span>
+              @if (state?.status === 'loading') {
+                <span class="layer-status" role="status">
+                  <span class="spinner" aria-hidden="true"></span>
+                  {{ state.converting ? 'Converting for preview…' : 'Loading preview…' }}
+                </span>
+              } @else if (state?.status === 'error') {
+                <span class="layer-status error">{{ state.message }}</span>
+              }
+            </span>
+          </div>
+        } @empty {
+          <div class="empty">
+            @if (store.importing().length > 0) {
+              <strong><span class="spinner" aria-hidden="true"></span> Importing media…</strong>
+              <span>Reading {{ store.importing().length }} file(s).</span>
+            } @else if (store.media().length === 0) {
+              <strong>Start by importing media</strong>
+              <span>Use Import Media or drop files into the window.</span>
+            } @else if (!hasClips()) {
+              <strong>Add a clip to the timeline</strong>
+              <span>Press “+ Add” next to a media item.</span>
+            } @else {
+              No video at playhead
+            }
+          </div>
+        }
+      </div>
+
+      @if (selectedLayer(); as layer) {
+        @if (!layer.track.locked) {
+          @let box = layerBox(layer);
+          <div
+            class="selection-box"
+            [style.left.px]="box.left"
+            [style.top.px]="box.top"
+            [style.width.px]="box.width"
+            [style.height.px]="box.height"
+            [style.rotate.deg]="layer.clip.transform.rotation"
+          >
+            @for (handle of handles; track handle.name) {
+              <span
+                class="handle"
+                [attr.data-handle]="handle.name"
+                [title]="
+                  handle.dx && handle.dy
+                    ? 'Resize (Shift: change proportions)'
+                    : 'Stretch (changes proportions)'
+                "
+                (pointerdown)="onHandlePointerDown($event, layer, handle)"
+              ></span>
+            }
+          </div>
+        }
       }
     </div>
     <div class="info">

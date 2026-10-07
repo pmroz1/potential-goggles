@@ -142,9 +142,96 @@ describe('App', () => {
           type: 'setClipTransform',
           sequenceId: 'seq-main',
           clipId: 'logo',
-          transform: { x: 770, y: -400, scale: 0.2, rotation: 0 },
+          transform: { x: 770, y: -400, scale: 0.2, scaleX: 1, scaleY: 1, rotation: 0 },
         },
       },
     ]);
+  });
+
+  it('adds and removes tracks from the timeline headers', async () => {
+    const { fixture, el } = await render();
+    const button = (label: string) =>
+      [...el.querySelectorAll<HTMLButtonElement>('.track-add button')].find((b) =>
+        b.textContent?.includes(label),
+      )!;
+    button('Video').click();
+    await fixture.whenStable();
+    button('Audio').click();
+    await fixture.whenStable();
+    const names = () => [...el.querySelectorAll('.track-name')].map((t) => t.textContent);
+    expect(names()).toEqual(['V3', 'V2', 'V1', 'A1', 'A2']);
+
+    el.querySelector<HTMLButtonElement>('.track-remove')!.click();
+    await fixture.whenStable();
+    expect(names()).toEqual(['V2', 'V1', 'A1', 'A2']);
+    expect(backend.calls.map((c) => c.method === 'apply' && c.op.type)).toEqual([
+      'addTrack',
+      'addTrack',
+      'removeTrack',
+    ]);
+  });
+
+  it('renders video and image previews for the layers', async () => {
+    const { fixture, el } = await render();
+    fixture.componentInstance['store'].setPlayhead(secondsToTicks(3));
+    await vi.waitFor(async () => {
+      await fixture.whenStable();
+      expect(el.querySelector('.layer[data-clip-id="clip-a"] video')?.getAttribute('src')).toBe(
+        'asset://src-video',
+      );
+    });
+    expect(el.querySelector('.layer[data-clip-id="logo"] img')?.getAttribute('src')).toBe(
+      'asset://src-logo',
+    );
+  });
+
+  it('resizes the selected layer with a handle and commits one transform', async () => {
+    const { fixture, el } = await render();
+    fixture.componentInstance['store'].setPlayhead(secondsToTicks(3));
+    await fixture.whenStable();
+    const layer = el.querySelector<HTMLElement>('.layer[data-clip-id="logo"]')!;
+    layer.focus();
+    layer.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    await fixture.whenStable();
+    const width = parseFloat(layer.style.width);
+    const height = parseFloat(layer.style.height);
+    const handle = el.querySelector<HTMLElement>('.handle[data-handle="se"]')!;
+
+    handle.dispatchEvent(pointer('pointerdown', 0, 0));
+    handle.dispatchEvent(pointer('pointermove', width / 2, height / 2));
+    frames.splice(0).forEach((frame) => frame(0));
+    expect(layer.style.scale).toBe('1.5 1.5');
+    expect(backend.calls).toEqual([]);
+
+    handle.dispatchEvent(pointer('pointerup', width / 2, height / 2));
+    await fixture.whenStable();
+    expect(backend.calls.length).toBe(1);
+    const call = backend.calls[0];
+    if (call.method !== 'apply' || call.op.type !== 'setClipTransform') {
+      throw new Error('expected setClipTransform');
+    }
+    // The top-left corner stays put: the centre moves by a quarter of the old size.
+    expect(call.op.transform.scale).toBeCloseTo(0.3);
+    expect(call.op.transform.x).toBeCloseTo(760 + (1920 * 0.2) / 4, 1);
+    expect(call.op.transform.y).toBeCloseTo(-400 + (1080 * 0.2) / 4, 1);
+    expect([call.op.transform.scaleX, call.op.transform.scaleY]).toEqual([1, 1]);
+  });
+
+  it('shows import progress in the media bin and status bar', async () => {
+    const { fixture, el } = await render();
+    let release!: () => void;
+    backend.importGate = new Promise((resolve) => (release = resolve));
+    backend.chosenFiles = ['/clips/holiday.mkv'];
+    fixture.componentInstance['store'].importMedia();
+    await vi.waitFor(async () => {
+      await new Promise((r) => setTimeout(r));
+      fixture.detectChanges();
+      expect(el.querySelector('.item.importing')?.textContent).toContain('holiday.mkv');
+    });
+    expect(el.querySelector('.status .activity')?.textContent).toContain('Importing holiday.mkv');
+    release();
+    await fixture.whenStable();
+    expect(el.querySelector('.item.importing')).toBeNull();
+    expect(el.querySelector('.status .activity')).toBeNull();
   });
 });

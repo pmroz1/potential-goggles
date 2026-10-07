@@ -118,3 +118,18 @@
 .status .error {
   color: var(--danger);
 }
+
+.status .activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  /* Quick tasks finish before the indicator appears, avoiding flicker. */
+  animation: activity-in 0s 150ms both;
+}
+
+@keyframes activity-in {
+  from {
+    visibility: hidden;
+  }
+}

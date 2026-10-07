@@ -27,6 +27,8 @@ pub enum EditError {
     NoTrackForLane(u32),
     #[error("transform values must be finite and scale must be positive")]
     InvalidTransform,
+    #[error("resolution must be between 1 and 16384 pixels in each dimension")]
+    InvalidResolution,
     #[error("frame rate numerator and denominator must be positive")]
     InvalidFrameRate,
     #[error("duration must be positive and no longer than the media")]

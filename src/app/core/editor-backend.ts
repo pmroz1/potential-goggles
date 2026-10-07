@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open, save } from '@tauri-apps/plugin-dialog';
@@ -24,8 +24,16 @@ export abstract class EditorBackend {
   abstract openProject(): Promise<EditorSnapshot | null>;
   /** Saves to `currentPath`, or asks for a location; resolves `null` when cancelled. */
   abstract saveProject(currentPath: string | null): Promise<EditorSnapshot | null>;
-  /** Imports `paths`, or asks for files when omitted; resolves `null` when cancelled. */
-  abstract importMedia(paths?: string[]): Promise<EditorSnapshot | null>;
+  /** Asks the user for media files; resolves `null` when cancelled. */
+  abstract chooseMediaFiles(): Promise<string[] | null>;
+  /** Adds files to the media pool (probing them may take a while). */
+  abstract importMedia(paths: string[]): Promise<EditorSnapshot>;
+  /**
+   * Resolves a URL the viewport can load for a video or image source. With
+   * `convert`, always uses an FFmpeg conversion instead of the original file
+   * (for formats or codecs the web view cannot play).
+   */
+  abstract previewUrl(sourceId: Id, convert: boolean): Promise<string>;
   /**
    * Asks where to save, then renders the sequence. Resolves the output path, or
    * `null` when the save dialog is cancelled. `onProgress` receives 0..1.
@@ -44,15 +52,26 @@ export abstract class EditorBackend {
 }
 
 const PROJECT_FILTER = [{ name: 'Potential Goggles project', extensions: ['pgproj'] }];
+/** Mirrors the extension lists in `src-tauri/src/lib.rs`. */
+const VIDEO_EXTENSIONS = [
+  ...['mp4', 'm4v', 'mov', 'qt', 'mkv', 'webm', 'avi', 'wmv', 'asf', 'flv', 'f4v', 'mpg'],
+  ...['mpeg', 'm2v', 'ts', 'mts', 'm2ts', '3gp', '3g2', 'ogv', 'vob', 'mxf', 'dv', 'y4m'],
+];
+const AUDIO_EXTENSIONS = [
+  ...['mp3', 'wav', 'flac', 'aac', 'ogg', 'oga', 'm4a', 'opus', 'wma', 'aif', 'aiff', 'aifc'],
+  ...['alac', 'ac3', 'amr', 'mka'],
+];
+const IMAGE_EXTENSIONS = [
+  ...['png', 'jpg', 'jpeg', 'jfif', 'gif', 'bmp', 'webp', 'avif', 'tif', 'tiff', 'tga', 'ico'],
+  ...['heic', 'heif', 'jxl'],
+];
 const MEDIA_FILTER = [
-  {
-    name: 'Media',
-    extensions: [
-      ...['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'wmv'],
-      ...['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'opus'],
-      ...['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'],
-    ],
-  },
+  { name: 'Media', extensions: [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS, ...IMAGE_EXTENSIONS] },
+  { name: 'Video', extensions: VIDEO_EXTENSIONS },
+  { name: 'Audio', extensions: AUDIO_EXTENSIONS },
+  { name: 'Images', extensions: IMAGE_EXTENSIONS },
+  // Anything else FFmpeg can read is detected by probing on import.
+  { name: 'All files', extensions: ['*'] },
 ];
 
 /** Talks to the commands registered in `src-tauri/src/lib.rs`. */
@@ -126,10 +145,17 @@ export class TauriEditorBackend extends EditorBackend {
     return path ? invoke('save_project', { path }) : null;
   }
 
-  async importMedia(paths?: string[]): Promise<EditorSnapshot | null> {
-    const chosen =
-      paths ?? (await open({ multiple: true, directory: false, filters: MEDIA_FILTER }));
-    return chosen && chosen.length > 0 ? invoke('import_media', { paths: chosen }) : null;
+  async chooseMediaFiles(): Promise<string[] | null> {
+    return open({ multiple: true, directory: false, filters: MEDIA_FILTER });
+  }
+
+  importMedia(paths: string[]): Promise<EditorSnapshot> {
+    return invoke('import_media', { paths });
+  }
+
+  async previewUrl(sourceId: Id, convert: boolean): Promise<string> {
+    const path = await invoke<string>('prepare_preview', { sourceId, forceConvert: convert });
+    return convertFileSrc(path);
   }
 
   onFilesDropped(

@@ -13,7 +13,7 @@
 
 mod ffmpeg;
 
-pub use ffmpeg::{FfmpegCli, build_export_args};
+pub use ffmpeg::{FfmpegCli, build_export_args, build_preview_args};
 
 use std::path::{Path, PathBuf};
 
@@ -107,6 +107,10 @@ pub trait MediaBackend: Send + Sync {
 
     fn open_decoder(&self, source: &MediaSource) -> Result<Box<dyn FrameDecoder>, MediaError>;
 
+    /// Converts `input` into a preview file at `output` that any web view can
+    /// display: an H.264/AAC MP4 for video, a PNG for still images.
+    fn make_preview(&self, input: &Path, kind: MediaKind, output: &Path) -> Result<(), MediaError>;
+
     /// Renders `sequence_id` of `project` to a file. `progress` receives values
     /// in `0.0..=1.0` and may return `false` to cancel.
     fn export(
@@ -149,6 +153,10 @@ impl MediaBackend for UnavailableBackend {
         self.unavailable()
     }
 
+    fn make_preview(&self, _input: &Path, _kind: MediaKind, _output: &Path) -> Result<(), MediaError> {
+        self.unavailable()
+    }
+
     fn export(
         &self,
         _project: &Project,
@@ -188,5 +196,10 @@ mod tests {
         let result = backend.export(&project, project.sequences[0].id, &settings, &mut |_| true);
         assert!(matches!(result, Err(MediaError::BackendUnavailable(_))));
         assert!(backend.open_decoder(&project.media[0]).is_err());
+        assert!(
+            backend
+                .make_preview(Path::new("a.mkv"), MediaKind::Video, Path::new("a.mp4"))
+                .is_err()
+        );
     }
 }

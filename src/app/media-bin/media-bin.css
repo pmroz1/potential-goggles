@@ -92,3 +92,11 @@
 .hint {
   font-size: 12px;
 }
+
+.item.importing {
+  opacity: 0.75;
+}
+
+.badge.loading {
+  background: var(--border);
+}

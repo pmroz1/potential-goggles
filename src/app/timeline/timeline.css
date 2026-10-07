@@ -27,22 +27,59 @@
 }
 
 .track-header {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  width: 100%;
-  padding: 0 10px;
-  border: 0;
+  box-sizing: border-box;
   border-bottom: 1px solid var(--border);
   border-left: 3px solid transparent;
   background: var(--panel-2);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
 }
 
 .track-header.target {
   border-left-color: var(--accent);
+}
+
+.track-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.track-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 18px;
+  opacity: 0;
+}
+
+.track-header:hover .track-remove,
+.track-remove:focus-visible {
+  opacity: 1;
+}
+
+.track-remove:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.track-add {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
 }
 
 .track-name {

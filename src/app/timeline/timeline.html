@@ -2,24 +2,64 @@
   <div class="headers">
     <div class="header-spacer">{{ timecode(store.playhead()) }}</div>
     @for (track of displayTracks(); track track.id) {
-      <button
-        type="button"
+      <div
         class="track-header"
         [class.audio]="track.kind === 'audio'"
         [class.target]="store.targetTrackId() === track.id"
         [style.height.px]="laneHeight"
-        [attr.aria-pressed]="store.targetTrackId() === track.id"
-        (click)="store.setTargetTrack(track.id)"
       >
-        <span class="track-name">{{ track.name }}</span>
-        <span class="track-meta">
-          {{ track.kind }} · z {{ track.zIndex }}
-          @if (track.locked) {
-            · locked
-          }
-        </span>
-      </button>
+        <button
+          type="button"
+          class="track-select"
+          [attr.aria-pressed]="store.targetTrackId() === track.id"
+          (click)="store.setTargetTrack(track.id)"
+        >
+          <span class="track-name">{{ track.name }}</span>
+          <span class="track-meta">
+            {{ track.kind }} · z {{ track.zIndex }}
+            @if (track.locked) {
+              · locked
+            }
+          </span>
+        </button>
+        <button
+          type="button"
+          class="track-remove"
+          [title]="
+            track.locked
+              ? track.name + ' is locked'
+              : 'Remove track ' +
+                track.name +
+                (track.clips.length ? ' and its clips (undoable)' : '')
+          "
+          [attr.aria-label]="'Remove track ' + track.name"
+          [disabled]="track.locked"
+          (click)="store.removeTrack(track.id)"
+        >
+          ×
+        </button>
+      </div>
     }
+    <div class="track-add">
+      <button
+        type="button"
+        class="small"
+        title="Add a video track on top"
+        [disabled]="!store.activeSequence()"
+        (click)="store.addTrack('video')"
+      >
+        + Video
+      </button>
+      <button
+        type="button"
+        class="small"
+        title="Add an audio track at the bottom"
+        [disabled]="!store.activeSequence()"
+        (click)="store.addTrack('audio')"
+      >
+        + Audio
+      </button>
+    </div>
   </div>
 
   <div class="scroll">
